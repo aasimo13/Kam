@@ -1,0 +1,68 @@
+# USB Camera Test Suite - Package Manifest
+# Specifies which files to include in the distribution package
+
+# Include important documentation
+include README.md
+include INSTALL.md
+include LICENSE
+include CHANGELOG.md
+
+# Include requirements files
+include requirements.txt
+include requirements-dev.txt
+
+# Include build and installation scripts
+include setup.py
+include pyinstaller.spec
+include build.py
+include Makefile
+
+# Include platform installation scripts
+include install.sh
+include install.bat
+include uninstall.sh
+include uninstall.bat
+
+# Include assets and resources
+recursive-include assets *
+recursive-include icons *
+recursive-include templates *
+recursive-include config *
+
+# Include source code
+recursive-include camera_test_suite *.py
+recursive-include tests *.py
+
+# Include configuration files
+include .gitignore
+include .flake8
+include mypy.ini
+include pytest.ini
+
+# Exclude development and build artifacts
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude *.egg-info
+global-exclude *.egg
+
+# Exclude build directories
+prune build
+prune dist
+prune .git
+prune .pytest_cache
+prune .mypy_cache
+prune htmlcov
+
+# Exclude IDE files
+global-exclude .vscode
+global-exclude .idea
+global-exclude *.swp
+global-exclude *.swo
+global-exclude *~
+
+# Exclude temporary files
+global-exclude *.tmp
+global-exclude *.bak
+global-exclude *.orig

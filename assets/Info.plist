@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>USB Camera Test Suite</string>
+    <key>CFBundleExecutable</key>
+    <string>camera-test-suite</string>
+    <key>CFBundleIconFile</key>
+    <string>camera-test-suite.icns</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.cameratests.usb-camera-test-suite</string>
+    <key>CFBundleName</key>
+    <string>USB Camera Test Suite</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>UCTS</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>This app needs camera access to test USB camera hardware functionality and capture test images for quality assessment.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app may need microphone access to test camera audio capabilities if available.</string>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Applications/USB Camera Test Suite.app/Contents/Resources</string>
+    </dict>
+    <key>NSDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>json</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>Test Results</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSTypeIsPackage</key>
+            <false/>
+        </dict>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>jpg</string>
+                <string>jpeg</string>
+                <string>png</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>Test Images</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSTypeIsPackage</key>
+            <false/>
+        </dict>
+    </array>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+</dict>
+</plist>

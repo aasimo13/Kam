@@ -1,0 +1,21 @@
+[Desktop Entry]
+Name=USB Camera Test Suite
+GenericName=Camera Hardware Tester
+Comment=Comprehensive hardware testing for USB cameras
+Comment[es]=Pruebas completas de hardware para cámaras USB
+Comment[fr]=Tests matériels complets pour caméras USB
+Comment[de]=Umfassende Hardware-Tests für USB-Kameras
+Keywords=camera;test;hardware;usb;quality;testing;wn-l2307k368;
+Categories=AudioVideo;Video;Photography;Development;
+Icon=camera-video
+Exec=camera-test-gui
+Terminal=false
+Type=Application
+StartupNotify=true
+MimeType=image/jpeg;image/png;image/bmp;
+StartupWMClass=camera-test-suite
+
+# Additional metadata
+X-GNOME-UsesNotifications=true
+X-KDE-StartupNotify=true
+X-XFCE-StartupNotify=true
