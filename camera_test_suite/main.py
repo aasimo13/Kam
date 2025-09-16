@@ -61,6 +61,9 @@ class CameraHardwareTester:
         self.setup_ui()
         self.setup_styles()
 
+        # Auto-detect USB cameras on startup
+        self.auto_detect_usb_cameras()
+
     def setup_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
@@ -243,17 +246,68 @@ class CameraHardwareTester:
         self.save_images_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(test_settings_frame, variable=self.save_images_var).grid(row=1, column=1, sticky="w")
 
-    def connect_camera(self):
-        """Connect to the selected camera"""
+    def auto_detect_usb_cameras(self):
+        """Auto-detect USB cameras and populate camera dropdown"""
+        usb_cameras = []
+
+        # Check for USB cameras using system tools
+        if platform.system() == "Darwin":  # macOS
+            try:
+                result = subprocess.run(["system_profiler", "SPUSBDataType"],
+                                      capture_output=True, text=True, timeout=5)
+                if "Camera" in result.stdout or "USB Video" in result.stdout:
+                    # Try to find working camera indices
+                    for i in range(10):
+                        try:
+                            test_camera = cv2.VideoCapture(i)
+                            if test_camera.isOpened():
+                                ret, frame = test_camera.read()
+                                if ret and frame is not None:
+                                    # Check if it's likely a USB camera (not built-in)
+                                    width = test_camera.get(cv2.CAP_PROP_FRAME_WIDTH)
+                                    height = test_camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                                    if width >= 640 and height >= 480:  # Minimum resolution for USB cameras
+                                        usb_cameras.append(i)
+                                        self.log_message(f"USB Camera detected at index {i}")
+                            test_camera.release()
+                        except:
+                            continue
+            except:
+                pass
+
+        # Update camera dropdown with detected cameras
+        if usb_cameras:
+            camera_combo = None
+            for widget in self.camera_frame.winfo_children():
+                if isinstance(widget, ttk.LabelFrame):
+                    for child in widget.winfo_children():
+                        if isinstance(child, ttk.Combobox):
+                            camera_combo = child
+                            break
+
+            if camera_combo:
+                camera_combo['values'] = [str(i) for i in usb_cameras]
+                if usb_cameras:
+                    self.camera_var.set(str(usb_cameras[0]))  # Set to first detected camera
+                    self.log_message(f"Found {len(usb_cameras)} USB camera(s)")
+
+                    # Auto-connect to first USB camera
+                    self.auto_connect_first_camera()
+        else:
+            self.log_message("No USB cameras detected")
+
+    def auto_connect_first_camera(self):
+        """Automatically connect to the first detected USB camera"""
         try:
             camera_index = int(self.camera_var.get())
             self.camera = cv2.VideoCapture(camera_index)
 
             if not self.camera.isOpened():
-                raise Exception("Could not open camera")
+                self.log_message(f"Failed to auto-connect to USB camera at index {camera_index}")
+                return
 
             self.camera_index = camera_index
-            self.connection_status.config(text="Connected", foreground="green")
+            self.connection_status.config(text="USB Camera Connected", foreground="green")
 
             # Get camera info
             self.update_camera_info()
@@ -261,11 +315,34 @@ class CameraHardwareTester:
             # Start preview
             self.start_preview()
 
-            self.log_message("Camera connected successfully")
+            self.log_message(f"USB Camera auto-connected at index {camera_index}")
 
         except Exception as e:
-            messagebox.showerror("Connection Error", f"Failed to connect to camera: {str(e)}")
-            self.log_message(f"Camera connection failed: {str(e)}")
+            self.log_message(f"USB Camera auto-connection failed: {str(e)}")
+
+    def connect_camera(self):
+        """Connect to the selected camera"""
+        try:
+            camera_index = int(self.camera_var.get())
+            self.camera = cv2.VideoCapture(camera_index)
+
+            if not self.camera.isOpened():
+                raise Exception("Could not open USB camera")
+
+            self.camera_index = camera_index
+            self.connection_status.config(text="USB Camera Connected", foreground="green")
+
+            # Get camera info
+            self.update_camera_info()
+
+            # Start preview
+            self.start_preview()
+
+            self.log_message("USB Camera connected successfully")
+
+        except Exception as e:
+            messagebox.showerror("Connection Error", f"Failed to connect to USB camera: {str(e)}")
+            self.log_message(f"USB Camera connection failed: {str(e)}")
 
     def disconnect_camera(self):
         """Disconnect from camera"""
@@ -284,8 +361,8 @@ class CameraHardwareTester:
         if not self.camera:
             return
 
-        info_text = "Camera Information:\n"
-        info_text += f"Index: {self.camera_index}\n"
+        info_text = "USB Camera Information:\n"
+        info_text += f"USB Camera Index: {self.camera_index}\n"
 
         # Get camera properties
         width = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
@@ -340,8 +417,12 @@ class CameraHardwareTester:
     def run_tests(self):
         """Run selected tests"""
         if not self.camera:
-            messagebox.showerror("Error", "Please connect a camera first")
-            return
+            # Auto-connect to USB camera if not connected
+            self.log_message("USB Camera not connected, attempting auto-connection...")
+            self.auto_detect_usb_cameras()
+            if not self.camera:
+                messagebox.showerror("Error", "No USB camera detected. Please connect a USB camera and try again.")
+                return
 
         if self.is_testing:
             messagebox.showwarning("Warning", "Tests are already running")

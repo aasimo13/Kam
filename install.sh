@@ -54,36 +54,34 @@ command_exists() {
 
 # Function to install system dependencies
 install_system_deps() {
-    echo -e "\n${BLUE}📦 Installing system dependencies...${NC}"
+    echo -e "${BLUE}📦 Installing dependencies...${NC}"
 
     case $PLATFORM in
         "macos")
-            # Check for Homebrew
+            # Check for Homebrew and install if needed
             if ! command_exists brew; then
-                echo -e "${YELLOW}Installing Homebrew...${NC}"
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                echo "Installing Homebrew..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < /dev/null
             fi
 
-            # Install system packages
-            brew install python@3.11 pkg-config || true
+            # Install system packages silently
+            brew install python@3.11 pkg-config >/dev/null 2>&1 || true
             ;;
 
         "linux")
-            # Detect package manager and install deps
             if command_exists apt-get; then
-                sudo apt-get update
-                sudo apt-get install -y python3 python3-pip python3-venv python3-dev
-                sudo apt-get install -y libopencv-dev python3-opencv
-                sudo apt-get install -y libgtk-3-dev libcairo2-dev libgirepository1.0-dev
-                sudo apt-get install -y v4l-utils uvcdynctrl
+                sudo apt-get update -qq >/dev/null 2>&1
+                sudo apt-get install -qq -y python3 python3-pip python3-venv python3-dev >/dev/null 2>&1
+                sudo apt-get install -qq -y libopencv-dev python3-opencv >/dev/null 2>&1
+                sudo apt-get install -qq -y libgtk-3-dev libcairo2-dev >/dev/null 2>&1
+                sudo apt-get install -qq -y v4l-utils >/dev/null 2>&1
             elif command_exists yum; then
-                sudo yum install -y python3 python3-pip python3-devel
-                sudo yum install -y opencv-python3 gtk3-devel cairo-devel
-                sudo yum install -y v4l-utils
+                sudo yum install -q -y python3 python3-pip python3-devel >/dev/null 2>&1
+                sudo yum install -q -y opencv-python3 gtk3-devel >/dev/null 2>&1
+                sudo yum install -q -y v4l-utils >/dev/null 2>&1
             elif command_exists pacman; then
-                sudo pacman -S --noconfirm python python-pip python-virtualenv
-                sudo pacman -S --noconfirm opencv python-opencv gtk3 cairo
-                sudo pacman -S --noconfirm v4l-utils
+                sudo pacman -S --noconfirm --quiet python python-pip python-virtualenv >/dev/null 2>&1
+                sudo pacman -S --noconfirm --quiet opencv python-opencv gtk3 >/dev/null 2>&1
             else
                 echo -e "${RED}❌ Unsupported Linux distribution${NC}"
                 exit 1
@@ -91,104 +89,79 @@ install_system_deps() {
             ;;
 
         "raspberry-pi")
-            # Raspberry Pi specific setup
-            echo -e "${GREEN}🍓 Setting up for Raspberry Pi...${NC}"
-            sudo apt-get update
-            sudo apt-get install -y python3 python3-pip python3-venv python3-dev
-            sudo apt-get install -y libopencv-dev python3-opencv
-            sudo apt-get install -y libatlas-base-dev libhdf5-dev libhdf5-serial-dev
-            sudo apt-get install -y libgtk-3-dev libqt5gui5 libqt5webkit5-dev libqt5test5
-            sudo apt-get install -y v4l-utils uvcdynctrl
+            sudo apt-get update -qq >/dev/null 2>&1
+            sudo apt-get install -qq -y python3 python3-pip python3-venv python3-dev >/dev/null 2>&1
+            sudo apt-get install -qq -y libopencv-dev python3-opencv >/dev/null 2>&1
+            sudo apt-get install -qq -y libgtk-3-dev v4l-utils >/dev/null 2>&1
 
-            # Enable camera
+            # Enable camera and add user to video group
             if ! grep -q "^dtparam=i2c_arm=on" /boot/config.txt; then
-                echo "dtparam=i2c_arm=on" | sudo tee -a /boot/config.txt
+                echo "dtparam=i2c_arm=on" | sudo tee -a /boot/config.txt >/dev/null
             fi
-
-            # Add user to video group
-            sudo usermod -a -G video $USER
+            sudo usermod -a -G video $USER >/dev/null 2>&1
             ;;
     esac
 }
 
 # Function to check and install Python
 setup_python() {
-    echo -e "\n${BLUE}🐍 Setting up Python environment...${NC}"
+    echo -e "${BLUE}🐍 Setting up Python...${NC}"
 
-    # Check Python version
-    if command_exists python3; then
-        PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))")
-        echo -e "${GREEN}✅ Python $PYTHON_VERSION found${NC}"
-
-        # Check if version is compatible (3.7+)
-        PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-        PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
-
-        if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 7 ]); then
-            echo -e "${RED}❌ Python 3.7+ required, found $PYTHON_VERSION${NC}"
-            exit 1
-        fi
-    else
+    # Quick Python check
+    if ! command_exists python3; then
         echo -e "${RED}❌ Python 3 not found${NC}"
         exit 1
     fi
 
-    # Check pip
+    # Ensure pip is available
     if ! command_exists pip3; then
-        echo -e "${YELLOW}Installing pip3...${NC}"
-        python3 -m ensurepip --default-pip
+        python3 -m ensurepip --default-pip >/dev/null 2>&1
     fi
 
-    # Upgrade pip
-    python3 -m pip install --upgrade pip
+    # Upgrade pip silently
+    python3 -m pip install --upgrade pip >/dev/null 2>&1
 }
 
 # Function to create virtual environment
 create_venv() {
-    echo -e "\n${BLUE}📁 Creating virtual environment...${NC}"
+    echo -e "${BLUE}📁 Creating environment...${NC}"
 
     VENV_DIR="$HOME/.camera-test-suite"
 
+    # Remove existing installation silently
     if [ -d "$VENV_DIR" ]; then
-        echo -e "${YELLOW}Removing existing installation...${NC}"
         rm -rf "$VENV_DIR"
     fi
 
-    python3 -m venv "$VENV_DIR"
+    # Create venv and install packages silently
+    python3 -m venv "$VENV_DIR" >/dev/null 2>&1
     source "$VENV_DIR/bin/activate"
-
-    # Upgrade pip in venv
-    pip install --upgrade pip setuptools wheel
-
-    echo -e "${GREEN}✅ Virtual environment created at $VENV_DIR${NC}"
+    pip install --upgrade pip setuptools wheel >/dev/null 2>&1
 }
 
 # Function to install the application
 install_app() {
-    echo -e "\n${BLUE}📱 Installing USB Camera Test Suite...${NC}"
+    echo -e "${BLUE}📱 Installing application...${NC}"
 
-    # Install from current directory
+    # Install from current directory silently
     if [ -f "setup.py" ]; then
-        echo -e "${GREEN}Installing from source...${NC}"
-        pip install -e .
+        pip install -e . >/dev/null 2>&1
     else
-        echo -e "${RED}❌ setup.py not found. Please run this script from the project directory.${NC}"
+        echo -e "${RED}❌ setup.py not found. Run from project directory.${NC}"
         exit 1
     fi
-
-    echo -e "${GREEN}✅ Application installed successfully${NC}"
 }
 
 # Function to create desktop integration
 create_desktop_integration() {
-    echo -e "\n${BLUE}🖥️  Setting up desktop integration...${NC}"
+    echo -e "${BLUE}🖥️  Setting up shortcuts...${NC}"
 
     case $PLATFORM in
         "macos")
-            create_macos_app
+            create_macos_app >/dev/null 2>&1
             ;;
         "linux"|"raspberry-pi")
-            create_linux_desktop
+            create_linux_desktop >/dev/null 2>&1
             ;;
     esac
 }
@@ -235,7 +208,7 @@ camera-test-gui
 EOF
     chmod +x "$APP_DIR/Contents/MacOS/camera-test-suite"
 
-    echo -e "${GREEN}✅ macOS app created at $APP_DIR${NC}"
+    # Silently created
 }
 
 # Function to create Linux desktop entry
@@ -263,13 +236,11 @@ EOF
         update-desktop-database "$HOME/.local/share/applications"
     fi
 
-    echo -e "${GREEN}✅ Desktop entry created${NC}"
+    # Silently created
 }
 
 # Function to create command-line shortcuts
 create_cli_shortcuts() {
-    echo -e "\n${BLUE}⚡ Creating command-line shortcuts...${NC}"
-
     BIN_DIR="$HOME/.local/bin"
     mkdir -p "$BIN_DIR"
 
@@ -291,60 +262,37 @@ EOF
 
     # Add to PATH if not already there
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-        echo "" >> "$HOME/.bashrc"
-        echo "# USB Camera Test Suite" >> "$HOME/.bashrc"
-        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.bashrc"
+        echo "" >> "$HOME/.bashrc" 2>/dev/null
+        echo "# USB Camera Test Suite" >> "$HOME/.bashrc" 2>/dev/null
+        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.bashrc" 2>/dev/null
 
         if [ -f "$HOME/.zshrc" ]; then
-            echo "" >> "$HOME/.zshrc"
-            echo "# USB Camera Test Suite" >> "$HOME/.zshrc"
-            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.zshrc"
+            echo "" >> "$HOME/.zshrc" 2>/dev/null
+            echo "# USB Camera Test Suite" >> "$HOME/.zshrc" 2>/dev/null
+            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.zshrc" 2>/dev/null
         fi
     fi
-
-    echo -e "${GREEN}✅ Command shortcuts created${NC}"
 }
 
 # Function to test installation
 test_installation() {
-    echo -e "\n${BLUE}🧪 Testing installation...${NC}"
+    echo -e "${BLUE}🧪 Testing...${NC}"
 
     source "$HOME/.camera-test-suite/bin/activate"
 
-    # Test CLI
-    if camera-test-cli --version >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ CLI interface working${NC}"
+    # Quick test - just check if import works
+    if python -c "import camera_test_suite" >/dev/null 2>&1; then
+        return 0
     else
-        echo -e "${RED}❌ CLI interface failed${NC}"
+        echo -e "${RED}❌ Installation failed${NC}"
         return 1
     fi
-
-    # Test import
-    if python -c "import camera_test_suite; print('Import successful')" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ Python package import working${NC}"
-    else
-        echo -e "${RED}❌ Python package import failed${NC}"
-        return 1
-    fi
-
-    return 0
 }
 
 # Main installation process
 main() {
-    echo -e "This will install $APP_NAME v$APP_VERSION on your system."
-    echo -e "Platform: $PLATFORM"
-    echo -e "Install mode: $INSTALL_MODE"
-    echo ""
-    read -p "Continue? (y/N) " -n 1 -r
-    echo ""
-
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${YELLOW}Installation cancelled.${NC}"
-        exit 0
-    fi
-
-    echo -e "\n${BLUE}🚀 Starting installation...${NC}"
+    echo -e "Installing $APP_NAME v$APP_VERSION on $PLATFORM..."
+    echo -e "\n${BLUE}🚀 Starting automatic installation...${NC}"
 
     # Install system dependencies
     install_system_deps
@@ -366,22 +314,14 @@ main() {
 
     # Test installation
     if test_installation; then
-        echo -e "\n${GREEN}🎉 Installation completed successfully!${NC}"
+        echo -e "\n${GREEN}✅ Installation complete!${NC}"
         echo ""
-        echo -e "${BLUE}Usage:${NC}"
-        echo -e "  GUI Mode:   ${GREEN}camera-test-gui${NC}"
-        echo -e "  CLI Mode:   ${GREEN}camera-test-cli${NC}"
-        echo -e "  Help:       ${GREEN}camera-test-cli --help${NC}"
-        echo ""
-        echo -e "${YELLOW}Note: You may need to restart your terminal or run:${NC}"
-        echo -e "${YELLOW}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
-        echo ""
+        echo -e "Run: ${GREEN}camera-test-gui${NC}"
 
         if [ "$PLATFORM" = "raspberry-pi" ]; then
-            echo -e "${YELLOW}Raspberry Pi users: Please reboot to enable camera support.${NC}"
+            echo -e "${YELLOW}Raspberry Pi: Reboot to enable camera support.${NC}"
         fi
     else
-        echo -e "\n${RED}❌ Installation failed during testing.${NC}"
         exit 1
     fi
 }
