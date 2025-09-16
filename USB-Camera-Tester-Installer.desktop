@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=USB Camera Tester Installer
+Comment=Install USB Camera Tester application
+Exec=bash -c 'cd "/Users/aaronsimo/Kam" && ./usb-camera-tester-installer.sh; echo "Press Enter to close..."; read'
+Icon=camera-video
+Terminal=true
+Categories=System;Utility;
+StartupNotify=true
