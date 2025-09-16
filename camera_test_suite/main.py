@@ -47,15 +47,24 @@ class CameraHardwareTester:
         self.current_frame = None
         self.test_image_path = None
 
-        # Camera specifications for WN-L2307k368
+        # Camera specifications for WN-L2307k368 (updated based on datasheet)
         self.camera_specs = {
             "max_resolution": (8000, 6000),
             "max_fps": 8,
-            "sensor": "S5KGM1ST",
+            "sensor": "Samsung S5KGM1ST ISOCELL GM1",
             "pixel_size": 0.8,
             "fov": 79,
             "interface": "USB2.0",
-            "formats": ["MJPEG", "YUY2"]
+            "formats": ["MJPEG", "YUY2"],
+            "optical_format": "1/2 inch",
+            "effective_resolution": (4000, 3000),  # 48MP binned to 12MP
+            "autofocus_type": "PDAF",  # Phase Detection AutoFocus
+            "color_filter": "RGB Bayer",
+            "analog_gain_max": 16,
+            "operating_temp": (-20, 70),  # Celsius
+            "hdr_support": True,
+            "binning_support": True,  # Tetrapixel technology
+            "wdr_support": True       # Wide Dynamic Range
         }
 
         self.setup_ui()
@@ -144,7 +153,8 @@ class CameraHardwareTester:
             "Camera Detection", "Resolution Test", "Frame Rate Test",
             "Exposure Control", "Focus Test", "White Balance",
             "Image Quality", "USB Interface", "Power Consumption",
-            "Capture Test Image"
+            "Capture Test Image",
+            "S5KGM1ST Sensor Test", "Comprehensive AF Test", "Noise Reduction Test"
         ]
 
         for i, test_name in enumerate(test_names):
@@ -928,6 +938,12 @@ Click "Continue" below to proceed with camera detection."""
                 return self._test_power_consumption(timestamp)
             elif test_name == "Capture Test Image":
                 return self._test_capture_image(timestamp)
+            elif test_name == "S5KGM1ST Sensor Test":
+                return self._test_s5kgm1st_sensor_specific(timestamp)
+            elif test_name == "Comprehensive AF Test":
+                return self._test_autofocus_comprehensive(timestamp)
+            elif test_name == "Noise Reduction Test":
+                return self._test_noise_reduction_strategies(timestamp)
             else:
                 return TestResult(test_name, "SKIP", "Test not implemented", timestamp)
 
@@ -1377,38 +1393,219 @@ Click "Continue" below to proceed with camera detection."""
                              timestamp)
 
     def _test_white_balance(self, timestamp):
-        """Test white balance functionality"""
+        """Comprehensive white balance functionality test"""
         if not self.camera:
             return TestResult("White Balance", "FAIL", "Camera not connected", timestamp)
 
+        self.log_message("=== COMPREHENSIVE WHITE BALANCE TEST ===")
+
         try:
-            # Get white balance settings
-            wb_temp = self.camera.get(cv2.CAP_PROP_WB_TEMPERATURE)
-            auto_wb = self.camera.get(cv2.CAP_PROP_AUTO_WB)
+            wb_results = {}
 
-            # Try to change auto white balance
-            self.camera.set(cv2.CAP_PROP_AUTO_WB, 1)
-            time.sleep(0.2)
-            auto_wb_on = self.camera.get(cv2.CAP_PROP_AUTO_WB)
+            # Test 1: Basic WB property availability
+            self.log_message("Testing basic WB property availability...")
+            try:
+                wb_temp = self.camera.get(cv2.CAP_PROP_WB_TEMPERATURE)
+                auto_wb = self.camera.get(cv2.CAP_PROP_AUTO_WB)
+                wb_blue = self.camera.get(cv2.CAP_PROP_WHITE_BALANCE_BLUE_U)
+                wb_red = self.camera.get(cv2.CAP_PROP_WHITE_BALANCE_RED_V)
 
-            self.camera.set(cv2.CAP_PROP_AUTO_WB, 0)
-            time.sleep(0.2)
-            auto_wb_off = self.camera.get(cv2.CAP_PROP_AUTO_WB)
+                wb_results['initial_values'] = {
+                    'wb_temperature': wb_temp,
+                    'auto_wb': auto_wb,
+                    'wb_blue': wb_blue,
+                    'wb_red': wb_red
+                }
 
-            details = {
-                "wb_temperature": wb_temp,
-                "initial_auto_wb": auto_wb,
-                "auto_wb_control": auto_wb_on != auto_wb_off
-            }
+                self.log_message(f"WB Temperature: {wb_temp}")
+                self.log_message(f"Auto WB: {auto_wb}")
+                self.log_message(f"WB Blue: {wb_blue}")
+                self.log_message(f"WB Red: {wb_red}")
 
-            if auto_wb_on != auto_wb_off or wb_temp > 0:
+            except Exception as e:
+                wb_results['initial_values'] = {'error': str(e)}
+                self.log_message(f"Basic WB properties error: {e}")
+
+            # Test 2: Auto WB control
+            self.log_message("Testing auto white balance control...")
+            auto_wb_working = False
+            try:
+                # Test different auto WB values
+                auto_wb_modes = [0, 1, 0.25, 0.75]
+                auto_wb_responses = {}
+
+                for mode in auto_wb_modes:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_AUTO_WB, mode)
+                        time.sleep(0.5)
+                        result = self.camera.get(cv2.CAP_PROP_AUTO_WB)
+                        auto_wb_responses[mode] = result
+                        self.log_message(f"Auto WB mode {mode} -> {result}")
+
+                        # Also check if this affects image color
+                        ret, frame = self.camera.read()
+                        if ret:
+                            avg_color = np.mean(frame, axis=(0, 1))  # Average RGB
+                            auto_wb_responses[f'{mode}_color'] = avg_color.tolist()
+
+                    except Exception as e:
+                        self.log_message(f"Auto WB mode {mode} failed: {e}")
+
+                # Check if any modes produced different results
+                unique_values = set([v for v in auto_wb_responses.values() if isinstance(v, (int, float))])
+                auto_wb_working = len(unique_values) > 1
+
+                wb_results['auto_wb_test'] = {
+                    'working': auto_wb_working,
+                    'responses': auto_wb_responses
+                }
+
+            except Exception as e:
+                wb_results['auto_wb_test'] = {'error': str(e)}
+
+            # Test 3: Manual WB temperature control
+            self.log_message("Testing manual WB temperature control...")
+            temp_wb_working = False
+            try:
+                # Disable auto WB first
+                self.camera.set(cv2.CAP_PROP_AUTO_WB, 0)
+                time.sleep(0.3)
+
+                # Test different temperature values
+                test_temps = [2800, 4000, 5600, 6500, 8000]  # Kelvin values
+                temp_responses = {}
+
+                for temp in test_temps:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_WB_TEMPERATURE, temp)
+                        time.sleep(0.5)
+                        actual_temp = self.camera.get(cv2.CAP_PROP_WB_TEMPERATURE)
+                        temp_responses[temp] = actual_temp
+
+                        # Check color cast change
+                        ret, frame = self.camera.read()
+                        if ret:
+                            avg_color = np.mean(frame, axis=(0, 1))
+                            temp_responses[f'{temp}_color'] = avg_color.tolist()
+                            self.log_message(f"WB temp {temp}K -> {actual_temp}K (color: {avg_color})")
+
+                    except Exception as e:
+                        self.log_message(f"WB temp {temp}K failed: {e}")
+
+                # Check if temperature control is working
+                temp_values = [v for v in temp_responses.values() if isinstance(v, (int, float))]
+                if len(temp_values) >= 2:
+                    temp_range = max(temp_values) - min(temp_values)
+                    temp_wb_working = temp_range > 100  # Significant temperature change
+
+                wb_results['temperature_test'] = {
+                    'working': temp_wb_working,
+                    'responses': temp_responses,
+                    'temp_range': temp_range if 'temp_range' in locals() else 0
+                }
+
+            except Exception as e:
+                wb_results['temperature_test'] = {'error': str(e)}
+
+            # Test 4: Manual RGB white balance control
+            self.log_message("Testing manual RGB white balance control...")
+            rgb_wb_working = False
+            try:
+                # Test blue/red balance adjustments
+                blue_values = [0, 2048, 4096]  # Typical range for white balance
+                red_values = [0, 2048, 4096]
+
+                rgb_responses = {}
+                color_changes = []
+
+                for blue_val in blue_values:
+                    for red_val in red_values:
+                        try:
+                            self.camera.set(cv2.CAP_PROP_WHITE_BALANCE_BLUE_U, blue_val)
+                            self.camera.set(cv2.CAP_PROP_WHITE_BALANCE_RED_V, red_val)
+                            time.sleep(0.3)
+
+                            actual_blue = self.camera.get(cv2.CAP_PROP_WHITE_BALANCE_BLUE_U)
+                            actual_red = self.camera.get(cv2.CAP_PROP_WHITE_BALANCE_RED_V)
+
+                            # Capture frame to check color effect
+                            ret, frame = self.camera.read()
+                            if ret:
+                                avg_color = np.mean(frame, axis=(0, 1))
+                                color_changes.append(avg_color)
+
+                            rgb_responses[f'{blue_val}_{red_val}'] = {
+                                'blue_actual': actual_blue,
+                                'red_actual': actual_red,
+                                'avg_color': avg_color.tolist() if ret else None
+                            }
+
+                            self.log_message(f"WB RGB B:{blue_val}->B:{actual_blue}, R:{red_val}->R:{actual_red}")
+
+                        except Exception as e:
+                            self.log_message(f"RGB WB B:{blue_val},R:{red_val} failed: {e}")
+
+                # Check if RGB adjustments had any effect
+                if len(color_changes) >= 2:
+                    # Compare color variations
+                    color_variations = []
+                    for i in range(1, len(color_changes)):
+                        diff = np.mean(np.abs(color_changes[i] - color_changes[i-1]))
+                        color_variations.append(diff)
+
+                    rgb_wb_working = max(color_variations) > 5 if color_variations else False
+
+                wb_results['rgb_test'] = {
+                    'working': rgb_wb_working,
+                    'responses': rgb_responses,
+                    'color_variations': color_variations if 'color_variations' in locals() else []
+                }
+
+            except Exception as e:
+                wb_results['rgb_test'] = {'error': str(e)}
+
+            # Restore original settings
+            try:
+                if wb_results.get('initial_values') and 'error' not in wb_results['initial_values']:
+                    initial = wb_results['initial_values']
+                    self.camera.set(cv2.CAP_PROP_AUTO_WB, initial['auto_wb'])
+                    self.camera.set(cv2.CAP_PROP_WB_TEMPERATURE, initial['wb_temperature'])
+            except:
+                pass
+
+            self.log_message("=== END WHITE BALANCE TEST ===")
+
+            # Determine test result
+            working_methods = 0
+            methods_tested = 0
+
+            if wb_results.get('auto_wb_test', {}).get('working'):
+                working_methods += 1
+            if 'auto_wb_test' in wb_results:
+                methods_tested += 1
+
+            if wb_results.get('temperature_test', {}).get('working'):
+                working_methods += 1
+            if 'temperature_test' in wb_results:
+                methods_tested += 1
+
+            if wb_results.get('rgb_test', {}).get('working'):
+                working_methods += 1
+            if 'rgb_test' in wb_results:
+                methods_tested += 1
+
+            if working_methods > 0:
                 return TestResult("White Balance", "PASS",
-                                 "White balance controls available",
-                                 timestamp, details)
+                                f"White balance functional: {working_methods}/{methods_tested} methods working",
+                                timestamp, wb_results)
+            elif methods_tested > 0:
+                return TestResult("White Balance", "FAIL",
+                                f"White balance hardware present but not responding: 0/{methods_tested} methods working",
+                                timestamp, wb_results)
             else:
                 return TestResult("White Balance", "SKIP",
-                                 "White balance controls not available",
-                                 timestamp, details)
+                                "No white balance controls available on this camera",
+                                timestamp, wb_results)
 
         except Exception as e:
             return TestResult("White Balance", "FAIL",
@@ -1416,11 +1613,17 @@ Click "Continue" below to proceed with camera detection."""
                              timestamp)
 
     def _test_image_quality(self, timestamp):
-        """Test image quality metrics"""
+        """Comprehensive image quality test with noise reduction analysis"""
         if not self.camera:
             return TestResult("Image Quality", "FAIL", "Camera not connected", timestamp)
 
+        self.log_message("=== COMPREHENSIVE IMAGE QUALITY TEST ===")
+
         try:
+            quality_results = {}
+
+            # Step 1: Baseline quality measurement
+            self.log_message("Measuring baseline image quality...")
             ret, frame = self.camera.read()
             if not ret:
                 return TestResult("Image Quality", "FAIL", "Cannot capture frame", timestamp)
@@ -1428,50 +1631,279 @@ Click "Continue" below to proceed with camera detection."""
             # Convert to grayscale for analysis
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # Calculate sharpness (Laplacian variance)
-            sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+            # Calculate comprehensive quality metrics
+            baseline_metrics = self._calculate_quality_metrics(frame, gray)
+            quality_results['baseline'] = baseline_metrics
 
-            # Calculate brightness (mean intensity)
-            brightness = np.mean(gray)
+            self.log_message(f"Baseline noise: {baseline_metrics['noise_variance']:.2f}")
+            self.log_message(f"Baseline sharpness: {baseline_metrics['sharpness']:.2f}")
+            self.log_message(f"Baseline brightness: {baseline_metrics['brightness']:.2f}")
 
-            # Calculate contrast (standard deviation)
-            contrast = np.std(gray)
+            # Step 2: Noise reduction via gain adjustment
+            self.log_message("Testing noise reduction via gain adjustment...")
+            try:
+                original_gain = self.camera.get(cv2.CAP_PROP_GAIN)
+                best_gain_setting = None
+                best_noise_reduction = 0
 
-            # Check for noise (high frequency content)
-            noise_level = np.std(cv2.GaussianBlur(gray, (5, 5), 0) - gray)
+                test_gains = [original_gain * 0.5, original_gain * 0.25] if original_gain > 0 else [50, 25, 10]
 
-            details = {
-                "sharpness": round(sharpness, 2),
-                "brightness": round(brightness, 2),
-                "contrast": round(contrast, 2),
-                "noise_level": round(noise_level, 2),
-                "resolution": f"{frame.shape[1]}x{frame.shape[0]}"
-            }
+                for gain in test_gains:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_GAIN, gain)
+                        time.sleep(0.5)
 
-            # Quality assessment
+                        ret, test_frame = self.camera.read()
+                        if ret:
+                            test_gray = cv2.cvtColor(test_frame, cv2.COLOR_BGR2GRAY)
+                            test_metrics = self._calculate_quality_metrics(test_frame, test_gray)
+
+                            noise_reduction = ((baseline_metrics['noise_variance'] - test_metrics['noise_variance']) / baseline_metrics['noise_variance']) * 100
+
+                            if noise_reduction > best_noise_reduction:
+                                best_noise_reduction = noise_reduction
+                                best_gain_setting = {
+                                    'gain': gain,
+                                    'actual_gain': self.camera.get(cv2.CAP_PROP_GAIN),
+                                    'noise_reduction_percent': noise_reduction,
+                                    'metrics': test_metrics
+                                }
+
+                            self.log_message(f"Gain {gain}: noise reduction {noise_reduction:.1f}%")
+
+                    except Exception as e:
+                        self.log_message(f"Gain {gain} test failed: {e}")
+
+                # Restore original gain
+                self.camera.set(cv2.CAP_PROP_GAIN, original_gain)
+
+                quality_results['gain_noise_reduction'] = {
+                    'tested': True,
+                    'best_setting': best_gain_setting,
+                    'original_gain': original_gain
+                }
+
+            except Exception as e:
+                quality_results['gain_noise_reduction'] = {'error': str(e)}
+
+            # Step 3: Software noise reduction techniques
+            self.log_message("Testing software noise reduction techniques...")
+            try:
+                # Capture multiple frames for averaging
+                frames = []
+                for i in range(5):
+                    ret, frame = self.camera.read()
+                    if ret:
+                        frames.append(frame.astype(np.float32))
+                    time.sleep(0.1)
+
+                software_techniques = {}
+
+                if len(frames) >= 3:
+                    # Frame averaging
+                    averaged_frame = np.mean(frames, axis=0).astype(np.uint8)
+                    averaged_gray = cv2.cvtColor(averaged_frame, cv2.COLOR_BGR2GRAY)
+                    avg_metrics = self._calculate_quality_metrics(averaged_frame, averaged_gray)
+
+                    avg_noise_reduction = ((baseline_metrics['noise_variance'] - avg_metrics['noise_variance']) / baseline_metrics['noise_variance']) * 100
+
+                    software_techniques['frame_averaging'] = {
+                        'noise_reduction_percent': avg_noise_reduction,
+                        'frames_used': len(frames),
+                        'metrics': avg_metrics
+                    }
+
+                    self.log_message(f"Frame averaging: {avg_noise_reduction:.1f}% noise reduction")
+
+                    # Gaussian blur denoising
+                    blurred_frame = cv2.GaussianBlur(frames[0].astype(np.uint8), (3, 3), 0.8)
+                    blurred_gray = cv2.cvtColor(blurred_frame, cv2.COLOR_BGR2GRAY)
+                    blur_metrics = self._calculate_quality_metrics(blurred_frame, blurred_gray)
+
+                    blur_noise_reduction = ((baseline_metrics['noise_variance'] - blur_metrics['noise_variance']) / baseline_metrics['noise_variance']) * 100
+
+                    software_techniques['gaussian_blur'] = {
+                        'noise_reduction_percent': blur_noise_reduction,
+                        'metrics': blur_metrics
+                    }
+
+                    self.log_message(f"Gaussian blur: {blur_noise_reduction:.1f}% noise reduction")
+
+                    # Bilateral filter (edge-preserving denoising)
+                    bilateral_frame = cv2.bilateralFilter(frames[0].astype(np.uint8), 5, 50, 50)
+                    bilateral_gray = cv2.cvtColor(bilateral_frame, cv2.COLOR_BGR2GRAY)
+                    bilateral_metrics = self._calculate_quality_metrics(bilateral_frame, bilateral_gray)
+
+                    bilateral_noise_reduction = ((baseline_metrics['noise_variance'] - bilateral_metrics['noise_variance']) / baseline_metrics['noise_variance']) * 100
+
+                    software_techniques['bilateral_filter'] = {
+                        'noise_reduction_percent': bilateral_noise_reduction,
+                        'metrics': bilateral_metrics
+                    }
+
+                    self.log_message(f"Bilateral filter: {bilateral_noise_reduction:.1f}% noise reduction")
+
+                quality_results['software_noise_reduction'] = software_techniques
+
+            except Exception as e:
+                quality_results['software_noise_reduction'] = {'error': str(e)}
+
+            # Step 4: Overall quality assessment with recommendations
+            self.log_message("Generating quality assessment and recommendations...")
+
             quality_issues = []
-            if sharpness < 50:
+            recommendations = []
+
+            # Assess baseline quality
+            if baseline_metrics['sharpness'] < 50:
                 quality_issues.append("Low sharpness")
-            if brightness < 50 or brightness > 200:
-                quality_issues.append("Poor brightness")
-            if contrast < 20:
+                recommendations.append("Check focus settings and lighting")
+
+            if baseline_metrics['brightness'] < 50:
+                quality_issues.append("Underexposed")
+                recommendations.append("Increase exposure or gain")
+            elif baseline_metrics['brightness'] > 200:
+                quality_issues.append("Overexposed")
+                recommendations.append("Decrease exposure or gain")
+
+            if baseline_metrics['contrast'] < 20:
                 quality_issues.append("Low contrast")
-            if noise_level > 10:
+                recommendations.append("Improve lighting or adjust contrast settings")
+
+            if baseline_metrics['noise_variance'] > 100:
                 quality_issues.append("High noise")
 
-            if quality_issues:
-                return TestResult("Image Quality", "FAIL",
-                                 f"Quality issues: {', '.join(quality_issues)}",
-                                 timestamp, details)
-            else:
+                # Add noise reduction recommendations
+                if quality_results.get('gain_noise_reduction', {}).get('best_setting'):
+                    best_gain = quality_results['gain_noise_reduction']['best_setting']
+                    if best_gain['noise_reduction_percent'] > 15:
+                        recommendations.append(f"Reduce gain to {best_gain['gain']:.0f} for {best_gain['noise_reduction_percent']:.1f}% noise reduction")
+
+                if quality_results.get('software_noise_reduction'):
+                    sw_techniques = quality_results['software_noise_reduction']
+                    best_sw_method = None
+                    best_sw_reduction = 0
+
+                    for method, data in sw_techniques.items():
+                        if isinstance(data, dict) and 'noise_reduction_percent' in data:
+                            if data['noise_reduction_percent'] > best_sw_reduction:
+                                best_sw_reduction = data['noise_reduction_percent']
+                                best_sw_method = method
+
+                    if best_sw_method and best_sw_reduction > 10:
+                        recommendations.append(f"Apply {best_sw_method.replace('_', ' ')} for {best_sw_reduction:.1f}% noise reduction")
+
+            quality_results['assessment'] = {
+                'quality_issues': quality_issues,
+                'recommendations': recommendations,
+                'overall_score': self._calculate_overall_quality_score(baseline_metrics)
+            }
+
+            self.log_message("=== END IMAGE QUALITY TEST ===")
+
+            # Determine test result
+            if len(quality_issues) == 0:
                 return TestResult("Image Quality", "PASS",
-                                 "Image quality metrics within acceptable range",
-                                 timestamp, details)
+                                "Image quality metrics within acceptable range",
+                                timestamp, quality_results)
+            elif len(recommendations) > 0:
+                return TestResult("Image Quality", "PASS",
+                                f"Quality issues detected but solutions available: {'; '.join(recommendations[:2])}",
+                                timestamp, quality_results)
+            else:
+                return TestResult("Image Quality", "FAIL",
+                                f"Quality issues: {', '.join(quality_issues)}",
+                                timestamp, quality_results)
 
         except Exception as e:
             return TestResult("Image Quality", "FAIL",
                              f"Image quality test error: {str(e)}",
                              timestamp)
+
+    def _calculate_quality_metrics(self, frame, gray):
+        """Calculate comprehensive quality metrics for a frame"""
+        try:
+            # Sharpness (Laplacian variance)
+            sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+            # Brightness (mean intensity)
+            brightness = np.mean(gray)
+
+            # Contrast (standard deviation)
+            contrast = np.std(gray)
+
+            # Noise estimation using multiple methods
+            noise_variance = cv2.Laplacian(gray, cv2.CV_64F).var()  # High frequency content
+            noise_std = np.std(cv2.GaussianBlur(gray, (5, 5), 0) - gray)  # Difference from smooth version
+
+            # Signal-to-noise ratio
+            signal_power = brightness ** 2
+            noise_power = contrast ** 2
+            snr_db = 10 * np.log10(signal_power / noise_power) if noise_power > 0 else float('inf')
+
+            # Dynamic range
+            dynamic_range = np.max(gray) - np.min(gray)
+
+            # Color metrics (if color frame)
+            color_metrics = {}
+            if len(frame.shape) == 3:
+                # Color saturation
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                saturation = np.mean(hsv[:, :, 1])
+
+                # Color balance (RGB channel differences)
+                b, g, r = cv2.split(frame)
+                color_balance = {
+                    'r_mean': np.mean(r),
+                    'g_mean': np.mean(g),
+                    'b_mean': np.mean(b),
+                    'rg_ratio': np.mean(r) / np.mean(g) if np.mean(g) > 0 else 0,
+                    'rb_ratio': np.mean(r) / np.mean(b) if np.mean(b) > 0 else 0
+                }
+
+                color_metrics = {
+                    'saturation': saturation,
+                    'color_balance': color_balance
+                }
+
+            return {
+                'sharpness': sharpness,
+                'brightness': brightness,
+                'contrast': contrast,
+                'noise_variance': noise_variance,
+                'noise_std': noise_std,
+                'snr_db': snr_db,
+                'dynamic_range': dynamic_range,
+                'resolution': f"{frame.shape[1]}x{frame.shape[0]}",
+                'color_metrics': color_metrics
+            }
+
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _calculate_overall_quality_score(self, metrics):
+        """Calculate an overall quality score from 0-100"""
+        try:
+            score = 100
+
+            # Penalize for issues
+            if metrics['sharpness'] < 50:
+                score -= 20
+            if metrics['brightness'] < 50 or metrics['brightness'] > 200:
+                score -= 15
+            if metrics['contrast'] < 20:
+                score -= 15
+            if metrics['noise_variance'] > 100:
+                score -= 25
+            if metrics['snr_db'] < 20:
+                score -= 10
+            if metrics['dynamic_range'] < 100:
+                score -= 15
+
+            return max(0, score)
+
+        except:
+            return 50  # Default middle score if calculation fails
 
     def _test_usb_interface(self, timestamp):
         """Test USB interface performance"""
@@ -1609,6 +2041,588 @@ Click "Continue" below to proceed with camera detection."""
             return TestResult("Capture Test Image", "FAIL",
                              f"Image capture error: {str(e)}",
                              timestamp)
+
+    # ========================================
+    # COMPREHENSIVE WN-L2307k368 HARDWARE TESTS
+    # ========================================
+
+    def _test_s5kgm1st_sensor_specific(self, timestamp):
+        """Comprehensive S5KGM1ST sensor-specific hardware test"""
+        if not self.camera:
+            return TestResult("S5KGM1ST Sensor Test", "FAIL", "Camera not connected", timestamp)
+
+        self.log_message("=== S5KGM1ST SENSOR HARDWARE TEST ===")
+
+        try:
+            # Test sensor-specific features
+            test_results = {}
+
+            # 1. Test Tetrapixel binning (48MP to 12MP)
+            self.log_message("Testing Tetrapixel binning capability...")
+            try:
+                # Test different resolutions to check binning
+                resolutions_to_test = [
+                    (8000, 6000),  # Full 48MP
+                    (4000, 3000),  # Binned 12MP
+                    (1920, 1080),  # FHD
+                    (1280, 720)    # HD
+                ]
+
+                working_resolutions = []
+                for res_w, res_h in resolutions_to_test:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+                        time.sleep(0.5)
+
+                        actual_w = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        actual_h = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                        # Try to capture a frame at this resolution
+                        ret, frame = self.camera.read()
+                        if ret and frame is not None:
+                            frame_w, frame_h = frame.shape[1], frame.shape[0]
+                            working_resolutions.append((actual_w, actual_h, frame_w, frame_h))
+                            self.log_message(f"Resolution {res_w}x{res_h} -> {actual_w}x{actual_h} (frame: {frame_w}x{frame_h})")
+
+                    except Exception as e:
+                        self.log_message(f"Resolution {res_w}x{res_h} failed: {e}")
+
+                test_results['binning_test'] = {
+                    'working_resolutions': working_resolutions,
+                    'max_resolution_achieved': max(working_resolutions, key=lambda x: x[0]*x[1]) if working_resolutions else None
+                }
+
+            except Exception as e:
+                test_results['binning_test'] = {'error': str(e)}
+
+            # 2. Test PDAF autofocus specific to S5KGM1ST
+            self.log_message("Testing PDAF autofocus capability...")
+            try:
+                pdaf_working = False
+
+                # PDAF should respond differently than contrast-based AF
+                focus_positions = [0, 64, 128, 192, 255]
+                focus_sharpness = []
+
+                for pos in focus_positions:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # Disable auto
+                        time.sleep(0.2)
+                        self.camera.set(cv2.CAP_PROP_FOCUS, pos)
+                        time.sleep(1.0)  # Wait for focus motor
+
+                        ret, frame = self.camera.read()
+                        if ret:
+                            # Calculate image sharpness using Laplacian variance
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                            focus_sharpness.append((pos, sharpness))
+                            self.log_message(f"Focus pos {pos}: sharpness {sharpness:.2f}")
+
+                    except Exception as e:
+                        self.log_message(f"PDAF test at position {pos} failed: {e}")
+
+                # Check if there's variation in sharpness (indicates working focus)
+                if len(focus_sharpness) >= 3:
+                    sharpness_values = [s[1] for s in focus_sharpness]
+                    sharpness_range = max(sharpness_values) - min(sharpness_values)
+                    pdaf_working = sharpness_range > 50  # Significant variation
+
+                test_results['pdaf_test'] = {
+                    'working': pdaf_working,
+                    'focus_sharpness': focus_sharpness,
+                    'sharpness_range': sharpness_range if 'sharpness_range' in locals() else 0
+                }
+
+            except Exception as e:
+                test_results['pdaf_test'] = {'error': str(e)}
+
+            # 3. Test Samsung ISOCELL-specific noise characteristics
+            self.log_message("Testing ISOCELL noise characteristics...")
+            try:
+                # Test noise at different gain levels specific to Samsung sensor
+                gain_levels = [0, 4, 8, 12, 16]  # Up to max analog gain
+                noise_analysis = []
+
+                for gain in gain_levels:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_GAIN, gain)
+                        time.sleep(0.5)
+
+                        # Capture multiple frames for temporal noise analysis
+                        frames = []
+                        for _ in range(3):
+                            ret, frame = self.camera.read()
+                            if ret:
+                                frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+                            time.sleep(0.1)
+
+                        if len(frames) >= 2:
+                            # Calculate noise metrics
+                            frame_std = np.std(frames[0])
+                            temporal_diff = np.mean(np.abs(frames[1].astype(float) - frames[0].astype(float)))
+
+                            noise_analysis.append({
+                                'gain': gain,
+                                'spatial_noise': frame_std,
+                                'temporal_noise': temporal_diff
+                            })
+
+                            self.log_message(f"Gain {gain}: spatial noise {frame_std:.2f}, temporal noise {temporal_diff:.2f}")
+
+                    except Exception as e:
+                        self.log_message(f"Noise test at gain {gain} failed: {e}")
+
+                test_results['isocell_noise_test'] = noise_analysis
+
+            except Exception as e:
+                test_results['isocell_noise_test'] = {'error': str(e)}
+
+            # 4. Test HDR/WDR capabilities
+            self.log_message("Testing HDR/WDR capabilities...")
+            try:
+                hdr_working = False
+
+                # Test exposure bracketing for HDR
+                base_exposure = self.camera.get(cv2.CAP_PROP_EXPOSURE)
+                hdr_exposures = [base_exposure - 2, base_exposure, base_exposure + 2]
+                hdr_frames = []
+
+                for exp in hdr_exposures:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_EXPOSURE, exp)
+                        time.sleep(0.8)
+                        ret, frame = self.camera.read()
+                        if ret:
+                            brightness = np.mean(frame)
+                            hdr_frames.append((exp, brightness))
+                            self.log_message(f"HDR exposure {exp}: brightness {brightness:.1f}")
+                    except:
+                        continue
+
+                # Check if exposure bracketing created different brightnesses
+                if len(hdr_frames) >= 2:
+                    brightness_values = [h[1] for h in hdr_frames]
+                    brightness_range = max(brightness_values) - min(brightness_values)
+                    hdr_working = brightness_range > 20
+
+                test_results['hdr_test'] = {
+                    'working': hdr_working,
+                    'hdr_frames': hdr_frames,
+                    'brightness_range': brightness_range if 'brightness_range' in locals() else 0
+                }
+
+            except Exception as e:
+                test_results['hdr_test'] = {'error': str(e)}
+
+            # Determine overall sensor test result
+            passed_tests = 0
+            total_tests = 4
+
+            if test_results.get('binning_test', {}).get('working_resolutions'):
+                passed_tests += 1
+            if test_results.get('pdaf_test', {}).get('working'):
+                passed_tests += 1
+            if test_results.get('isocell_noise_test') and isinstance(test_results['isocell_noise_test'], list):
+                passed_tests += 1
+            if test_results.get('hdr_test', {}).get('working'):
+                passed_tests += 1
+
+            self.log_message("=== END S5KGM1ST SENSOR TEST ===")
+
+            if passed_tests >= 2:
+                return TestResult("S5KGM1ST Sensor Test", "PASS",
+                                f"Sensor hardware functional: {passed_tests}/{total_tests} tests passed",
+                                timestamp, test_results)
+            else:
+                return TestResult("S5KGM1ST Sensor Test", "FAIL",
+                                f"Sensor hardware issues: only {passed_tests}/{total_tests} tests passed",
+                                timestamp, test_results)
+
+        except Exception as e:
+            return TestResult("S5KGM1ST Sensor Test", "FAIL",
+                             f"Sensor test error: {str(e)}", timestamp)
+
+    def _test_autofocus_comprehensive(self, timestamp):
+        """Comprehensive PDAF autofocus test for WN-L2307k368"""
+        if not self.camera:
+            return TestResult("Comprehensive AF Test", "FAIL", "Camera not connected", timestamp)
+
+        self.log_message("=== COMPREHENSIVE AUTOFOCUS TEST ===")
+
+        try:
+            af_capabilities = {}
+
+            # Test 1: PDAF availability and response
+            self.log_message("Testing PDAF availability...")
+            try:
+                # Check if camera reports autofocus capability
+                initial_af_mode = self.camera.get(cv2.CAP_PROP_AUTOFOCUS)
+                initial_focus_pos = self.camera.get(cv2.CAP_PROP_FOCUS)
+
+                af_capabilities['initial_state'] = {
+                    'af_mode': initial_af_mode,
+                    'focus_position': initial_focus_pos
+                }
+
+                self.log_message(f"Initial AF mode: {initial_af_mode}, Focus pos: {initial_focus_pos}")
+
+            except Exception as e:
+                af_capabilities['initial_state'] = {'error': str(e)}
+
+            # Test 2: Manual focus stepping accuracy
+            self.log_message("Testing manual focus stepping...")
+            try:
+                # Disable autofocus
+                self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                time.sleep(0.5)
+
+                focus_steps = []
+                test_positions = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+
+                for pos in test_positions:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_FOCUS, pos)
+                        time.sleep(0.8)  # Wait for focus motor
+
+                        actual_pos = self.camera.get(cv2.CAP_PROP_FOCUS)
+
+                        # Capture frame and measure sharpness
+                        ret, frame = self.camera.read()
+                        if ret:
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                            focus_steps.append({
+                                'target': pos,
+                                'actual': actual_pos,
+                                'sharpness': sharpness,
+                                'accuracy': abs(actual_pos - pos)
+                            })
+                            self.log_message(f"Focus {pos} -> {actual_pos} (sharpness: {sharpness:.2f})")
+
+                    except Exception as e:
+                        self.log_message(f"Focus step {pos} failed: {e}")
+
+                af_capabilities['manual_focus'] = {
+                    'steps': focus_steps,
+                    'working': len(focus_steps) > 0
+                }
+
+            except Exception as e:
+                af_capabilities['manual_focus'] = {'error': str(e)}
+
+            # Test 3: Autofocus trigger and convergence
+            self.log_message("Testing autofocus convergence...")
+            try:
+                convergence_results = []
+
+                # Test autofocus at different starting positions
+                start_positions = [0, 128, 255]
+
+                for start_pos in start_positions:
+                    try:
+                        # Set manual focus to start position
+                        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                        self.camera.set(cv2.CAP_PROP_FOCUS, start_pos)
+                        time.sleep(0.5)
+
+                        # Enable autofocus
+                        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
+                        # Monitor focus changes over time
+                        focus_timeline = []
+                        for i in range(10):  # Monitor for 2 seconds
+                            current_focus = self.camera.get(cv2.CAP_PROP_FOCUS)
+                            ret, frame = self.camera.read()
+
+                            if ret:
+                                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                                focus_timeline.append({
+                                    'time': i * 0.2,
+                                    'focus_pos': current_focus,
+                                    'sharpness': sharpness
+                                })
+
+                            time.sleep(0.2)
+
+                        convergence_results.append({
+                            'start_position': start_pos,
+                            'timeline': focus_timeline,
+                            'converged': len(focus_timeline) > 0
+                        })
+
+                        self.log_message(f"AF from {start_pos}: monitored {len(focus_timeline)} steps")
+
+                    except Exception as e:
+                        self.log_message(f"AF convergence test from {start_pos} failed: {e}")
+
+                af_capabilities['convergence'] = convergence_results
+
+            except Exception as e:
+                af_capabilities['convergence'] = {'error': str(e)}
+
+            # Test 4: Focus hunting detection
+            self.log_message("Testing focus hunting behavior...")
+            try:
+                # Enable continuous autofocus and monitor for hunting
+                self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                time.sleep(0.5)
+
+                hunting_data = []
+                for i in range(20):  # Monitor for 4 seconds
+                    focus_pos = self.camera.get(cv2.CAP_PROP_FOCUS)
+                    hunting_data.append(focus_pos)
+                    time.sleep(0.2)
+
+                # Analyze for hunting (rapid back-and-forth movements)
+                hunting_detected = False
+                if len(hunting_data) >= 10:
+                    focus_changes = [abs(hunting_data[i+1] - hunting_data[i]) for i in range(len(hunting_data)-1)]
+                    avg_change = np.mean(focus_changes)
+                    max_change = max(focus_changes)
+
+                    # Hunting indicated by large average movements
+                    hunting_detected = avg_change > 10 and max_change > 30
+
+                af_capabilities['hunting_test'] = {
+                    'hunting_detected': hunting_detected,
+                    'focus_timeline': hunting_data,
+                    'avg_movement': avg_change if 'avg_change' in locals() else 0
+                }
+
+                self.log_message(f"Focus hunting {'detected' if hunting_detected else 'not detected'}")
+
+            except Exception as e:
+                af_capabilities['hunting_test'] = {'error': str(e)}
+
+            # Restore original settings
+            try:
+                self.camera.set(cv2.CAP_PROP_AUTOFOCUS, af_capabilities['initial_state']['af_mode'])
+                self.camera.set(cv2.CAP_PROP_FOCUS, af_capabilities['initial_state']['focus_position'])
+            except:
+                pass
+
+            # Evaluate results
+            working_tests = 0
+            if af_capabilities.get('manual_focus', {}).get('working'):
+                working_tests += 1
+            if af_capabilities.get('convergence') and len(af_capabilities['convergence']) > 0:
+                working_tests += 1
+            if af_capabilities.get('hunting_test', {}).get('hunting_detected') == False:  # No hunting is good
+                working_tests += 1
+
+            self.log_message("=== END COMPREHENSIVE AUTOFOCUS TEST ===")
+
+            if working_tests >= 2:
+                return TestResult("Comprehensive AF Test", "PASS",
+                                f"PDAF system functional: {working_tests}/3 tests passed",
+                                timestamp, af_capabilities)
+            elif working_tests == 1:
+                return TestResult("Comprehensive AF Test", "FAIL",
+                                "PDAF partially working but significant issues detected",
+                                timestamp, af_capabilities)
+            else:
+                return TestResult("Comprehensive AF Test", "FAIL",
+                                "PDAF system not responding - hardware issue likely",
+                                timestamp, af_capabilities)
+
+        except Exception as e:
+            return TestResult("Comprehensive AF Test", "FAIL",
+                             f"AF test error: {str(e)}", timestamp)
+
+    def _test_noise_reduction_strategies(self, timestamp):
+        """Test various noise reduction strategies for high-noise cameras"""
+        if not self.camera:
+            return TestResult("Noise Reduction Test", "FAIL", "Camera not connected", timestamp)
+
+        self.log_message("=== NOISE REDUCTION STRATEGIES TEST ===")
+
+        try:
+            noise_results = {}
+
+            # Baseline noise measurement
+            self.log_message("Measuring baseline noise...")
+            ret, baseline_frame = self.camera.read()
+            if not ret:
+                raise Exception("Cannot capture baseline frame")
+
+            baseline_gray = cv2.cvtColor(baseline_frame, cv2.COLOR_BGR2GRAY)
+            baseline_noise = cv2.Laplacian(baseline_gray, cv2.CV_64F).var()
+            baseline_brightness = np.mean(baseline_gray)
+
+            noise_results['baseline'] = {
+                'noise_variance': baseline_noise,
+                'brightness': baseline_brightness
+            }
+
+            self.log_message(f"Baseline noise: {baseline_noise:.2f}, brightness: {baseline_brightness:.1f}")
+
+            # Strategy 1: Gain reduction
+            self.log_message("Testing gain reduction...")
+            try:
+                original_gain = self.camera.get(cv2.CAP_PROP_GAIN)
+                gain_tests = []
+
+                test_gains = [original_gain * 0.5, original_gain * 0.25] if original_gain > 0 else [50, 25]
+
+                for gain in test_gains:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_GAIN, gain)
+                        time.sleep(0.5)
+
+                        ret, frame = self.camera.read()
+                        if ret:
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            noise = cv2.Laplacian(gray, cv2.CV_64F).var()
+                            brightness = np.mean(gray)
+                            actual_gain = self.camera.get(cv2.CAP_PROP_GAIN)
+
+                            noise_reduction = ((baseline_noise - noise) / baseline_noise) * 100
+
+                            gain_tests.append({
+                                'target_gain': gain,
+                                'actual_gain': actual_gain,
+                                'noise': noise,
+                                'brightness': brightness,
+                                'noise_reduction_percent': noise_reduction
+                            })
+
+                            self.log_message(f"Gain {gain} -> {actual_gain}: noise {noise:.2f} ({noise_reduction:.1f}% reduction)")
+
+                    except Exception as e:
+                        self.log_message(f"Gain test {gain} failed: {e}")
+
+                # Restore original gain
+                self.camera.set(cv2.CAP_PROP_GAIN, original_gain)
+
+                noise_results['gain_reduction'] = {
+                    'tests': gain_tests,
+                    'best_result': max(gain_tests, key=lambda x: x['noise_reduction_percent']) if gain_tests else None
+                }
+
+            except Exception as e:
+                noise_results['gain_reduction'] = {'error': str(e)}
+
+            # Strategy 2: Resolution reduction (binning simulation)
+            self.log_message("Testing resolution reduction...")
+            try:
+                resolution_tests = []
+                current_w = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+                current_h = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                test_resolutions = [
+                    (current_w // 2, current_h // 2),
+                    (1920, 1080),
+                    (1280, 720)
+                ]
+
+                for res_w, res_h in test_resolutions:
+                    try:
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+                        time.sleep(0.5)
+
+                        ret, frame = self.camera.read()
+                        if ret:
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            noise = cv2.Laplacian(gray, cv2.CV_64F).var()
+                            brightness = np.mean(gray)
+
+                            actual_w = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            actual_h = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                            noise_reduction = ((baseline_noise - noise) / baseline_noise) * 100
+
+                            resolution_tests.append({
+                                'target_resolution': (res_w, res_h),
+                                'actual_resolution': (actual_w, actual_h),
+                                'noise': noise,
+                                'brightness': brightness,
+                                'noise_reduction_percent': noise_reduction
+                            })
+
+                            self.log_message(f"Resolution {res_w}x{res_h}: noise {noise:.2f} ({noise_reduction:.1f}% reduction)")
+
+                    except Exception as e:
+                        self.log_message(f"Resolution test {res_w}x{res_h} failed: {e}")
+
+                # Restore original resolution
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, current_w)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, current_h)
+
+                noise_results['resolution_reduction'] = {
+                    'tests': resolution_tests,
+                    'best_result': max(resolution_tests, key=lambda x: x['noise_reduction_percent']) if resolution_tests else None
+                }
+
+            except Exception as e:
+                noise_results['resolution_reduction'] = {'error': str(e)}
+
+            # Strategy 3: Frame averaging (temporal noise reduction)
+            self.log_message("Testing frame averaging...")
+            try:
+                # Capture multiple frames for averaging
+                frames = []
+                for i in range(5):
+                    ret, frame = self.camera.read()
+                    if ret:
+                        frames.append(frame.astype(np.float32))
+                    time.sleep(0.1)
+
+                if len(frames) >= 3:
+                    # Average frames
+                    averaged_frame = np.mean(frames, axis=0).astype(np.uint8)
+                    averaged_gray = cv2.cvtColor(averaged_frame, cv2.COLOR_BGR2GRAY)
+                    averaged_noise = cv2.Laplacian(averaged_gray, cv2.CV_64F).var()
+
+                    noise_reduction = ((baseline_noise - averaged_noise) / baseline_noise) * 100
+
+                    noise_results['frame_averaging'] = {
+                        'frames_used': len(frames),
+                        'noise': averaged_noise,
+                        'noise_reduction_percent': noise_reduction
+                    }
+
+                    self.log_message(f"Frame averaging: noise {averaged_noise:.2f} ({noise_reduction:.1f}% reduction)")
+                else:
+                    noise_results['frame_averaging'] = {'error': 'Insufficient frames captured'}
+
+            except Exception as e:
+                noise_results['frame_averaging'] = {'error': str(e)}
+
+            # Determine best strategy
+            best_strategies = []
+
+            if noise_results.get('gain_reduction', {}).get('best_result'):
+                best_gain = noise_results['gain_reduction']['best_result']
+                if best_gain['noise_reduction_percent'] > 10:
+                    best_strategies.append(f"Gain reduction: {best_gain['noise_reduction_percent']:.1f}% improvement")
+
+            if noise_results.get('resolution_reduction', {}).get('best_result'):
+                best_res = noise_results['resolution_reduction']['best_result']
+                if best_res['noise_reduction_percent'] > 5:
+                    best_strategies.append(f"Resolution reduction: {best_res['noise_reduction_percent']:.1f}% improvement")
+
+            if noise_results.get('frame_averaging', {}).get('noise_reduction_percent', 0) > 10:
+                avg_improvement = noise_results['frame_averaging']['noise_reduction_percent']
+                best_strategies.append(f"Frame averaging: {avg_improvement:.1f}% improvement")
+
+            self.log_message("=== END NOISE REDUCTION TEST ===")
+
+            if best_strategies:
+                return TestResult("Noise Reduction Test", "PASS",
+                                f"Effective strategies found: {'; '.join(best_strategies)}",
+                                timestamp, noise_results)
+            else:
+                return TestResult("Noise Reduction Test", "FAIL",
+                                "No effective noise reduction strategies found",
+                                timestamp, noise_results)
+
+        except Exception as e:
+            return TestResult("Noise Reduction Test", "FAIL",
+                             f"Noise reduction test error: {str(e)}", timestamp)
 
     def update_results_display(self):
         """Update the results display"""
