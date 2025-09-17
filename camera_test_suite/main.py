@@ -924,15 +924,31 @@ Click "Continue" below to proceed with camera detection."""
                 self.log_message(f"Running test: {test_name}")
                 self.progress_var.set((i / total_tests) * 100)
 
-                # Run the specific test
-                result = self._run_single_test(test_name)
-                self.test_results.append(result)
+                # Run the specific test with additional safety checks
+                try:
+                    result = self._run_single_test(test_name)
+                    self.test_results.append(result)
 
-                # Update display
-                self.root.after(0, self.update_results_display)
+                    # Update display
+                    self.root.after(0, self.update_results_display)
 
-                # Small delay between tests
-                time.sleep(0.5)
+                    # Small delay between tests
+                    time.sleep(0.5)
+
+                    # Check if camera is still connected after test
+                    if not self.camera or not self.camera.isOpened():
+                        self.log_message("Camera disconnected during testing - stopping sequence")
+                        break
+
+                except Exception as e:
+                    # Handle any unexpected test failures
+                    error_result = TestResult(test_name, "FAIL", f"Unexpected test error: {str(e)}",
+                                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    self.test_results.append(error_result)
+                    self.log_message(f"Test {test_name} caused unexpected error: {str(e)}")
+
+                    # Continue with next test instead of crashing
+                    continue
 
             self.progress_var.set(100)
             self.log_message("Test sequence completed")
@@ -947,6 +963,10 @@ Click "Continue" below to proceed with camera detection."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:
+            # Ensure camera is still connected before each test
+            if not self.camera or not self.camera.isOpened():
+                return TestResult(test_name, "FAIL", "Camera disconnected during testing", timestamp)
+
             if test_name == "Camera Detection":
                 return self._test_camera_detection(timestamp)
             elif test_name == "Resolution Test":
@@ -1331,7 +1351,15 @@ Click "Continue" below to proceed with camera detection."""
 
                 for focus_val in test_focus_values:
                     try:
-                        self.camera.set(cv2.CAP_PROP_FOCUS, focus_val)
+                        # Check if camera is still connected
+                        if not self.camera or not self.camera.isOpened():
+                            break
+
+                        success = self.camera.set(cv2.CAP_PROP_FOCUS, focus_val)
+                        if not success:
+                            self.log_message(f"Focus value {focus_val} set failed")
+                            continue
+
                         time.sleep(0.8)  # Wait for focus motor
                         actual_focus = self.camera.get(cv2.CAP_PROP_FOCUS)
 
@@ -1465,20 +1493,32 @@ Click "Continue" below to proceed with camera detection."""
 
                 for mode in auto_wb_modes:
                     try:
-                        self.camera.set(cv2.CAP_PROP_AUTO_WB, mode)
+                        # Check if camera is still connected
+                        if not self.camera or not self.camera.isOpened():
+                            break
+
+                        success = self.camera.set(cv2.CAP_PROP_AUTO_WB, mode)
+                        if not success:
+                            self.log_message(f"Auto WB mode {mode} set failed")
+                            continue
+
                         time.sleep(0.5)
                         result = self.camera.get(cv2.CAP_PROP_AUTO_WB)
                         auto_wb_responses[mode] = result
                         self.log_message(f"Auto WB mode {mode} -> {result}")
 
                         # Also check if this affects image color
-                        ret, frame = self.camera.read()
-                        if ret:
-                            avg_color = np.mean(frame, axis=(0, 1))  # Average RGB
-                            auto_wb_responses[f'{mode}_color'] = avg_color.tolist()
+                        try:
+                            ret, frame = self.camera.read()
+                            if ret and frame is not None:
+                                avg_color = np.mean(frame, axis=(0, 1))  # Average RGB
+                                auto_wb_responses[f'{mode}_color'] = avg_color.tolist()
+                        except Exception as e:
+                            self.log_message(f"Frame read during WB test failed: {e}")
 
                     except Exception as e:
                         self.log_message(f"Auto WB mode {mode} failed: {e}")
+                        # Continue with other modes even if one fails
 
                 # Check if any modes produced different results
                 unique_values = set([v for v in auto_wb_responses.values() if isinstance(v, (int, float))])
@@ -2041,21 +2081,35 @@ Click "Continue" below to proceed with camera detection."""
             if not ret or frame is None:
                 return TestResult("Capture Test Image", "FAIL", "Cannot capture frame from camera", timestamp)
 
-            # Create output directory in user's home directory or temp directory
-            if platform.system() == "Windows":
-                test_dir = Path.home() / "Documents" / "USB_Camera_Test_Images"
-            elif platform.system() == "Darwin":  # macOS
-                test_dir = Path.home() / "Documents" / "USB_Camera_Test_Images"
-            else:  # Linux
-                test_dir = Path.home() / "USB_Camera_Test_Images"
+            # Multiple fallback options for test image directory
+            import tempfile
+            test_dir = None
+            error_messages = []
 
-            # Fallback to temp directory if home directory access fails
-            try:
-                test_dir.mkdir(parents=True, exist_ok=True)
-            except (PermissionError, OSError):
-                import tempfile
-                test_dir = Path(tempfile.gettempdir()) / "USB_Camera_Test_Images"
-                test_dir.mkdir(parents=True, exist_ok=True)
+            # Try user Documents directory first
+            for candidate_dir in [
+                Path.home() / "Documents" / "USB_Camera_Test_Images",  # Documents folder
+                Path.home() / "Desktop" / "USB_Camera_Test_Images",    # Desktop folder
+                Path.home() / "USB_Camera_Test_Images",                # Home directory
+                Path(tempfile.gettempdir()) / "USB_Camera_Test_Images", # System temp
+                Path("/tmp") / "USB_Camera_Test_Images" if platform.system() != "Windows" else Path("C:/temp") / "USB_Camera_Test_Images"  # Fallback temp
+            ]:
+                try:
+                    candidate_dir.mkdir(parents=True, exist_ok=True)
+                    # Test write access by creating a test file
+                    test_file = candidate_dir / "test_write.tmp"
+                    test_file.write_text("test")
+                    test_file.unlink()  # Delete test file
+                    test_dir = candidate_dir
+                    break
+                except (PermissionError, OSError, FileNotFoundError) as e:
+                    error_messages.append(f"{candidate_dir}: {str(e)}")
+                    continue
+
+            if test_dir is None:
+                return TestResult("Capture Test Image", "FAIL",
+                                 f"Cannot create writable directory. Tried: {'; '.join(error_messages)}",
+                                 timestamp)
 
             # Save test image
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
