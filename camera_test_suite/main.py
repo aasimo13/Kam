@@ -339,7 +339,11 @@ class CameraHardwareTester:
         for i in range(15):  # Test more indices
             test_camera = None
             try:
-                test_camera = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
+                # Platform-specific camera backend selection
+                if platform.system() == "Darwin":  # macOS
+                    test_camera = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
+                else:
+                    test_camera = cv2.VideoCapture(i)
 
                 if test_camera is not None and test_camera.isOpened():
                     test_camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -724,7 +728,12 @@ Click "Continue" below to proceed with camera detection."""
         """Automatically connect to the first detected USB camera"""
         try:
             camera_index = int(self.camera_var.get())
-            self.camera = cv2.VideoCapture(camera_index)
+
+            # Platform-specific camera backend selection
+            if platform.system() == "Darwin":  # macOS
+                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+            else:
+                self.camera = cv2.VideoCapture(camera_index)
 
             if not self.camera.isOpened():
                 self.log_message(f"Failed to auto-connect to USB camera at index {camera_index}")
@@ -756,7 +765,11 @@ Click "Continue" below to proceed with camera detection."""
                 # Direct index number
                 camera_index = int(camera_selection)
 
-            self.camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+            # Platform-specific camera backend selection
+            if platform.system() == "Darwin":  # macOS
+                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+            else:
+                self.camera = cv2.VideoCapture(camera_index)
 
             if not self.camera.isOpened():
                 raise Exception("Could not open USB camera")
@@ -818,24 +831,39 @@ Click "Continue" below to proceed with camera detection."""
     def start_preview(self):
         """Start camera preview"""
         def update_preview():
-            if self.camera and self.camera.isOpened():
-                ret, frame = self.camera.read()
-                if ret:
-                    self.current_frame = frame.copy()
+            try:
+                if self.camera and self.camera.isOpened():
+                    ret, frame = self.camera.read()
+                    if ret and frame is not None:
+                        self.current_frame = frame.copy()
 
-                    # Resize for preview
-                    frame = cv2.resize(frame, (640, 480))
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        # Resize for preview
+                        frame = cv2.resize(frame, (640, 480))
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                    # Convert to PhotoImage
-                    image = Image.fromarray(frame)
-                    photo = ImageTk.PhotoImage(image)
+                        # Convert to PhotoImage
+                        image = Image.fromarray(frame)
+                        photo = ImageTk.PhotoImage(image)
 
-                    self.preview_label.config(image=photo, text="")
-                    self.preview_label.image = photo
+                        self.preview_label.config(image=photo, text="")
+                        self.preview_label.image = photo
+                    else:
+                        # Frame read failed, show error message
+                        self.preview_label.config(image="", text="Camera frame read failed")
 
-                # Schedule next update
-                self.root.after(30, update_preview)
+                    # Schedule next update only if camera is still connected
+                    if self.camera and self.camera.isOpened():
+                        self.root.after(30, update_preview)
+                else:
+                    # Camera disconnected, stop preview
+                    self.preview_label.config(image="", text="No camera connected")
+            except Exception as e:
+                # Handle any preview errors gracefully
+                self.preview_label.config(image="", text=f"Preview error: {str(e)}")
+                self.log_message(f"Preview error: {str(e)}")
+                # Try to continue preview after error
+                if self.camera and self.camera.isOpened():
+                    self.root.after(100, update_preview)  # Longer delay after error
 
         update_preview()
 
@@ -2010,8 +2038,8 @@ Click "Continue" below to proceed with camera detection."""
 
         try:
             ret, frame = self.camera.read()
-            if not ret:
-                return TestResult("Capture Test Image", "FAIL", "Cannot capture frame", timestamp)
+            if not ret or frame is None:
+                return TestResult("Capture Test Image", "FAIL", "Cannot capture frame from camera", timestamp)
 
             # Create output directory in user's home directory or temp directory
             if platform.system() == "Windows":
