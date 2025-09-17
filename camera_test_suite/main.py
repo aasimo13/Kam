@@ -941,9 +941,16 @@ Click "Continue" below to proceed with camera detection."""
     def log_message(self, message):
         """Log message to test output"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.test_output.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.test_output.see(tk.END)
-        self.root.update_idletasks()
+        log_line = f"[{timestamp}] {message}\n"
+
+        # Print to console for debugging
+        print(log_line.strip())
+
+        # Only write to UI if test_output exists
+        if hasattr(self, 'test_output') and self.test_output:
+            self.test_output.insert(tk.END, log_line)
+            self.test_output.see(tk.END)
+            self.root.update_idletasks()
 
     def run_tests(self):
         """Run selected tests"""
