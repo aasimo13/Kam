@@ -81,7 +81,25 @@ class CameraHardwareTester:
 
     def setup_styles(self):
         style = ttk.Style()
-        style.theme_use('clam')
+        try:
+            # Try clam theme first
+            style.theme_use('clam')
+            self.log_message("Using 'clam' theme")
+        except Exception as e:
+            try:
+                # Fallback to default theme
+                style.theme_use('default')
+                self.log_message(f"Clam theme failed ({e}), using 'default' theme")
+            except Exception as e2:
+                # Last resort - aqua for macOS
+                if platform.system() == "Darwin":
+                    try:
+                        style.theme_use('aqua')
+                        self.log_message(f"Default theme failed ({e2}), using 'aqua' theme")
+                    except Exception as e3:
+                        self.log_message(f"All themes failed: clam({e}), default({e2}), aqua({e3})")
+                else:
+                    self.log_message(f"Theme setup failed: clam({e}), default({e2})")
 
         # Configure custom styles
         style.configure("Title.TLabel", font=("Arial", 16, "bold"))
@@ -91,9 +109,11 @@ class CameraHardwareTester:
         style.configure("Skip.TLabel", foreground="orange", font=("Arial", 10, "bold"))
 
     def setup_ui(self):
+        self.log_message("Starting UI setup...")
         # Create main notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.log_message("Notebook created")
 
         # Create tabs
         self.create_camera_tab()
