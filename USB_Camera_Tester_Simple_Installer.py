@@ -238,7 +238,6 @@ Would you like to launch the application now?"""
         launcher_script = '''#!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOURCES_DIR="$SCRIPT_DIR/../Resources"
-cd "$RESOURCES_DIR"
 
 # Find Python executable
 PYTHON_CMD=""
@@ -251,8 +250,11 @@ else
     exit 1
 fi
 
-# Launch the application
-exec "$PYTHON_CMD" camera_test_suite/main.py "$@"
+# Change to a clean directory to avoid numpy source conflicts
+cd "$HOME"
+
+# Launch the application with full path
+exec "$PYTHON_CMD" "$RESOURCES_DIR/camera_test_suite/main.py" "$@"
 '''
 
         launcher_path = os.path.join(macos_dir, "USBCameraTester")
