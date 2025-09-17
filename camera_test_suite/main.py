@@ -24,6 +24,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Tuple
 import subprocess
 import platform
+from pathlib import Path
 
 @dataclass
 class TestResult:
@@ -2012,19 +2013,32 @@ Click "Continue" below to proceed with camera detection."""
             if not ret:
                 return TestResult("Capture Test Image", "FAIL", "Cannot capture frame", timestamp)
 
-            # Create output directory
-            os.makedirs("test_images", exist_ok=True)
+            # Create output directory in user's home directory or temp directory
+            if platform.system() == "Windows":
+                test_dir = Path.home() / "Documents" / "USB_Camera_Test_Images"
+            elif platform.system() == "Darwin":  # macOS
+                test_dir = Path.home() / "Documents" / "USB_Camera_Test_Images"
+            else:  # Linux
+                test_dir = Path.home() / "USB_Camera_Test_Images"
+
+            # Fallback to temp directory if home directory access fails
+            try:
+                test_dir.mkdir(parents=True, exist_ok=True)
+            except (PermissionError, OSError):
+                import tempfile
+                test_dir = Path(tempfile.gettempdir()) / "USB_Camera_Test_Images"
+                test_dir.mkdir(parents=True, exist_ok=True)
 
             # Save test image
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            image_filename = f"test_images/test_image_{timestamp_str}.jpg"
+            image_filename = test_dir / f"test_image_{timestamp_str}.jpg"
 
-            success = cv2.imwrite(image_filename, frame)
+            success = cv2.imwrite(str(image_filename), frame)
 
             if success:
-                self.test_image_path = image_filename
+                self.test_image_path = str(image_filename)
                 details = {
-                    "image_path": image_filename,
+                    "image_path": str(image_filename),
                     "image_size": f"{frame.shape[1]}x{frame.shape[0]}",
                     "file_size": os.path.getsize(image_filename)
                 }
