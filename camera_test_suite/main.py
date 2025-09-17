@@ -1277,27 +1277,51 @@ Click "Continue" below to proceed with camera detection."""
 
             self.log_message("=== END EXPOSURE CONTROL TEST ===")
 
-            # Determine overall result
+            # STRICT EVALUATION for photobooth compatibility
+            exposure_methods_working = 0
+            critical_exposure_failures = []
+
             if method1_working:
-                return TestResult("Exposure Control", "PASS",
-                                f"Direct exposure control working ({len(working_exposures)} values)",
-                                timestamp, details)
-            elif method2_working:
+                exposure_methods_working += 1
+                self.log_message("✓ Direct exposure control: WORKING")
+            else:
+                critical_exposure_failures.append("Direct exposure control not responding")
+                self.log_message("✗ Direct exposure control: FAILED")
+
+            if auto_exp_working:
+                exposure_methods_working += 1
+                self.log_message("✓ Auto-exposure: WORKING")
+            else:
+                critical_exposure_failures.append("Auto-exposure not responding")
+                self.log_message("✗ Auto-exposure: FAILED")
+
+            if method2_working:
+                exposure_methods_working += 1
                 alternatives = []
                 if 'working_brightness' in locals() and len(working_brightness) > 0:
                     alternatives.append("brightness")
                 if 'working_gain' in locals() and len(working_gain) > 0:
                     alternatives.append("gain")
+                self.log_message(f"✓ Alternative controls: WORKING ({', '.join(alternatives)})")
+            else:
+                self.log_message("✗ Alternative controls: FAILED")
+
+            # STRICT CRITERIA: At least 2 exposure methods must work for photobooth reliability
+            if exposure_methods_working >= 2:
                 return TestResult("Exposure Control", "PASS",
-                                f"Alternative controls working: {', '.join(alternatives)}",
+                                f"Exposure control PHOTOBOOTH READY: {exposure_methods_working}/3 methods working",
                                 timestamp, details)
-            elif auto_exp_working:
+            elif exposure_methods_working == 1 and auto_exp_working:
                 return TestResult("Exposure Control", "PASS",
-                                "Auto-exposure modes functional",
+                                "Exposure control basic functionality: Auto-exposure working (limited manual control)",
+                                timestamp, details)
+            elif exposure_methods_working == 1:
+                return TestResult("Exposure Control", "FAIL",
+                                f"Exposure control LIMITED: Only 1/3 methods working - NOT PHOTOBOOTH RELIABLE",
                                 timestamp, details)
             else:
                 return TestResult("Exposure Control", "FAIL",
-                                "No exposure control methods responsive",
+                                f"Exposure control FAILED: No responsive methods - NOT PHOTOBOOTH COMPATIBLE",
                                 timestamp, details)
 
         except Exception as e:
@@ -1644,32 +1668,58 @@ Click "Continue" below to proceed with camera detection."""
 
             self.log_message("=== END WHITE BALANCE TEST ===")
 
-            # Determine test result
+            # STRICT EVALUATION for photobooth compatibility
             working_methods = 0
             methods_tested = 0
+            critical_wb_failures = []
 
-            if wb_results.get('auto_wb_test', {}).get('working'):
+            # Auto white balance is CRITICAL for photobooths
+            auto_wb_working = wb_results.get('auto_wb_test', {}).get('working', False)
+            if auto_wb_working:
                 working_methods += 1
+                self.log_message("✓ Auto White Balance: WORKING")
+            else:
+                critical_wb_failures.append("Auto white balance not responding")
+                self.log_message("✗ Auto White Balance: FAILED")
             if 'auto_wb_test' in wb_results:
                 methods_tested += 1
 
-            if wb_results.get('temperature_test', {}).get('working'):
+            # Manual temperature control is IMPORTANT for photobooths
+            temp_wb_working = wb_results.get('temperature_test', {}).get('working', False)
+            if temp_wb_working:
                 working_methods += 1
+                self.log_message("✓ Temperature White Balance: WORKING")
+            else:
+                self.log_message("✗ Temperature White Balance: FAILED")
             if 'temperature_test' in wb_results:
                 methods_tested += 1
 
-            if wb_results.get('rgb_test', {}).get('working'):
+            # RGB white balance is NICE TO HAVE
+            rgb_wb_working = wb_results.get('rgb_test', {}).get('working', False)
+            if rgb_wb_working:
                 working_methods += 1
+                self.log_message("✓ RGB White Balance: WORKING")
+            else:
+                self.log_message("✗ RGB White Balance: FAILED")
             if 'rgb_test' in wb_results:
                 methods_tested += 1
 
-            if working_methods > 0:
+            # STRICT CRITERIA: Auto WB must work for photobooth use
+            if auto_wb_working and working_methods >= 2:
                 return TestResult("White Balance", "PASS",
-                                f"White balance functional: {working_methods}/{methods_tested} methods working",
+                                f"White balance PHOTOBOOTH READY: {working_methods}/{methods_tested} methods working",
+                                timestamp, wb_results)
+            elif auto_wb_working:
+                return TestResult("White Balance", "PASS",
+                                f"White balance basic functionality: Auto WB working but limited manual control",
+                                timestamp, wb_results)
+            elif working_methods > 0:
+                return TestResult("White Balance", "FAIL",
+                                f"White balance NOT PHOTOBOOTH COMPATIBLE: Auto WB failed, {working_methods}/{methods_tested} manual methods working",
                                 timestamp, wb_results)
             elif methods_tested > 0:
                 return TestResult("White Balance", "FAIL",
-                                f"White balance hardware present but not responding: 0/{methods_tested} methods working",
+                                f"White balance hardware present but NOT RESPONDING: 0/{methods_tested} methods working",
                                 timestamp, wb_results)
             else:
                 return TestResult("White Balance", "SKIP",
@@ -2370,39 +2420,81 @@ Click "Continue" below to proceed with camera detection."""
             # Test 2: Manual focus stepping accuracy
             self.log_message("Testing manual focus stepping...")
             try:
+                # Check if camera is still connected
+                if not self.camera or not self.camera.isOpened():
+                    af_capabilities['manual_focus'] = {'error': 'Camera disconnected'}
+                    raise Exception("Camera disconnected during focus test")
+
                 # Disable autofocus
-                self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                af_disable_success = self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                if not af_disable_success:
+                    self.log_message("Warning: Could not disable autofocus")
+
                 time.sleep(0.5)
 
                 focus_steps = []
                 test_positions = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+                successful_steps = 0
+                focus_actually_changed = False
 
                 for pos in test_positions:
                     try:
-                        self.camera.set(cv2.CAP_PROP_FOCUS, pos)
+                        # Check camera connection before each step
+                        if not self.camera or not self.camera.isOpened():
+                            break
+
+                        # Get focus before setting
+                        focus_before = self.camera.get(cv2.CAP_PROP_FOCUS)
+
+                        # Set focus position
+                        focus_set_success = self.camera.set(cv2.CAP_PROP_FOCUS, pos)
+                        if not focus_set_success:
+                            self.log_message(f"Failed to set focus to {pos}")
+                            continue
+
                         time.sleep(0.8)  # Wait for focus motor
 
                         actual_pos = self.camera.get(cv2.CAP_PROP_FOCUS)
 
+                        # CRITICAL: Check if focus actually changed
+                        if abs(actual_pos - focus_before) > 5:  # Significant change
+                            focus_actually_changed = True
+
                         # Capture frame and measure sharpness
                         ret, frame = self.camera.read()
-                        if ret:
+                        if ret and frame is not None:
                             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                             sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+                            accuracy = abs(actual_pos - pos)
                             focus_steps.append({
                                 'target': pos,
                                 'actual': actual_pos,
                                 'sharpness': sharpness,
-                                'accuracy': abs(actual_pos - pos)
+                                'accuracy': accuracy,
+                                'focus_changed': abs(actual_pos - focus_before) > 5
                             })
-                            self.log_message(f"Focus {pos} -> {actual_pos} (sharpness: {sharpness:.2f})")
+                            successful_steps += 1
+                            self.log_message(f"Focus {pos} -> {actual_pos} (sharpness: {sharpness:.2f}, accuracy: {accuracy})")
+                        else:
+                            self.log_message(f"Frame read failed at focus position {pos}")
 
                     except Exception as e:
                         self.log_message(f"Focus step {pos} failed: {e}")
 
+                # STRICT CRITERIA: Focus must actually work for photobooth use
+                manual_focus_working = (
+                    successful_steps >= 5 and  # At least 5 successful steps
+                    focus_actually_changed and  # Focus must actually move
+                    len([s for s in focus_steps if s['accuracy'] < 20]) >= 3  # At least 3 accurate steps
+                )
+
                 af_capabilities['manual_focus'] = {
                     'steps': focus_steps,
-                    'working': len(focus_steps) > 0
+                    'successful_steps': successful_steps,
+                    'focus_actually_changed': focus_actually_changed,
+                    'working': manual_focus_working,
+                    'strict_criteria': True
                 }
 
             except Exception as e:
@@ -2411,50 +2503,113 @@ Click "Continue" below to proceed with camera detection."""
             # Test 3: Autofocus trigger and convergence
             self.log_message("Testing autofocus convergence...")
             try:
+                # Check if camera is still connected
+                if not self.camera or not self.camera.isOpened():
+                    af_capabilities['convergence'] = {'error': 'Camera disconnected'}
+                    raise Exception("Camera disconnected during AF convergence test")
+
                 convergence_results = []
+                successful_convergences = 0
 
                 # Test autofocus at different starting positions
                 start_positions = [0, 128, 255]
 
                 for start_pos in start_positions:
                     try:
+                        # Check connection before each test
+                        if not self.camera or not self.camera.isOpened():
+                            break
+
                         # Set manual focus to start position
                         self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-                        self.camera.set(cv2.CAP_PROP_FOCUS, start_pos)
+                        time.sleep(0.3)
+
+                        focus_set_success = self.camera.set(cv2.CAP_PROP_FOCUS, start_pos)
+                        if not focus_set_success:
+                            self.log_message(f"Failed to set starting focus position {start_pos}")
+                            continue
+
                         time.sleep(0.5)
 
+                        # Get initial focus position
+                        initial_focus = self.camera.get(cv2.CAP_PROP_FOCUS)
+
                         # Enable autofocus
-                        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                        af_enable_success = self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                        if not af_enable_success:
+                            self.log_message(f"Failed to enable autofocus from position {start_pos}")
+                            continue
 
                         # Monitor focus changes over time
                         focus_timeline = []
-                        for i in range(10):  # Monitor for 2 seconds
-                            current_focus = self.camera.get(cv2.CAP_PROP_FOCUS)
-                            ret, frame = self.camera.read()
+                        focus_changed = False
+                        max_sharpness = 0
 
-                            if ret:
-                                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                                sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
-                                focus_timeline.append({
-                                    'time': i * 0.2,
-                                    'focus_pos': current_focus,
-                                    'sharpness': sharpness
-                                })
+                        for i in range(15):  # Monitor for 3 seconds
+                            try:
+                                current_focus = self.camera.get(cv2.CAP_PROP_FOCUS)
+                                ret, frame = self.camera.read()
 
-                            time.sleep(0.2)
+                                if ret and frame is not None:
+                                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                    sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+                                    focus_timeline.append({
+                                        'time': i * 0.2,
+                                        'focus_pos': current_focus,
+                                        'sharpness': sharpness
+                                    })
+
+                                    # Check if focus actually moved significantly
+                                    if abs(current_focus - initial_focus) > 10:
+                                        focus_changed = True
+
+                                    if sharpness > max_sharpness:
+                                        max_sharpness = sharpness
+
+                                time.sleep(0.2)
+                            except Exception as e:
+                                self.log_message(f"Frame capture failed during AF monitoring: {e}")
+                                break
+
+                        # STRICT CRITERIA: Autofocus must actually work
+                        sharpness_values = [f['sharpness'] for f in focus_timeline if 'sharpness' in f]
+                        sharpness_improved = (max_sharpness > 0 and len(sharpness_values) > 0 and
+                                            max_sharpness > min(sharpness_values) * 1.2)  # 20% improvement
+
+                        converged = (
+                            len(focus_timeline) >= 10 and  # Got enough data points
+                            focus_changed and              # Focus actually moved
+                            sharpness_improved             # Image actually got sharper
+                        )
+
+                        if converged:
+                            successful_convergences += 1
 
                         convergence_results.append({
                             'start_position': start_pos,
+                            'initial_focus': initial_focus,
                             'timeline': focus_timeline,
-                            'converged': len(focus_timeline) > 0
+                            'focus_changed': focus_changed,
+                            'sharpness_improved': sharpness_improved,
+                            'converged': converged,
+                            'max_sharpness': max_sharpness
                         })
 
-                        self.log_message(f"AF from {start_pos}: monitored {len(focus_timeline)} steps")
+                        self.log_message(f"AF from {start_pos}: {len(focus_timeline)} steps, changed={focus_changed}, converged={converged}")
 
                     except Exception as e:
                         self.log_message(f"AF convergence test from {start_pos} failed: {e}")
 
-                af_capabilities['convergence'] = convergence_results
+                # STRICT CRITERIA: At least 2 out of 3 starting positions must show working AF
+                af_convergence_working = successful_convergences >= 2
+
+                af_capabilities['convergence'] = {
+                    'results': convergence_results,
+                    'successful_convergences': successful_convergences,
+                    'working': af_convergence_working,
+                    'strict_criteria': True
+                }
 
             except Exception as e:
                 af_capabilities['convergence'] = {'error': str(e)}
@@ -2500,28 +2655,55 @@ Click "Continue" below to proceed with camera detection."""
             except:
                 pass
 
-            # Evaluate results
+            # STRICT EVALUATION for photobooth compatibility
             working_tests = 0
-            if af_capabilities.get('manual_focus', {}).get('working'):
+            critical_failures = []
+
+            # Manual focus must work properly (CRITICAL for photobooth)
+            manual_focus_working = af_capabilities.get('manual_focus', {}).get('working', False)
+            if manual_focus_working:
                 working_tests += 1
-            if af_capabilities.get('convergence') and len(af_capabilities['convergence']) > 0:
+                self.log_message("✓ Manual focus: WORKING")
+            else:
+                critical_failures.append("Manual focus not responding properly")
+                self.log_message("✗ Manual focus: FAILED")
+
+            # Autofocus convergence must work (CRITICAL for photobooth)
+            convergence_working = af_capabilities.get('convergence', {}).get('working', False)
+            if convergence_working:
                 working_tests += 1
-            if af_capabilities.get('hunting_test', {}).get('hunting_detected') == False:  # No hunting is good
+                self.log_message("✓ Autofocus convergence: WORKING")
+            else:
+                critical_failures.append("Autofocus does not converge properly")
+                self.log_message("✗ Autofocus convergence: FAILED")
+
+            # Focus hunting should be minimal (DESIRABLE but not critical)
+            hunting_detected = af_capabilities.get('hunting_test', {}).get('hunting_detected', True)
+            if not hunting_detected:  # No hunting is good
                 working_tests += 1
+                self.log_message("✓ Focus stability: NO HUNTING")
+            else:
+                self.log_message("⚠ Focus stability: HUNTING DETECTED")
 
             self.log_message("=== END COMPREHENSIVE AUTOFOCUS TEST ===")
 
-            if working_tests >= 2:
+            # STRICT CRITERIA: Both manual focus AND autofocus must work for PASS
+            # This ensures camera will work reliably in photobooths
+            if working_tests >= 3:
                 return TestResult("Comprehensive AF Test", "PASS",
-                                f"PDAF system functional: {working_tests}/3 tests passed",
+                                f"PDAF system fully functional: {working_tests}/3 tests passed - PHOTOBOOTH READY",
                                 timestamp, af_capabilities)
-            elif working_tests == 1:
+            elif working_tests == 2 and manual_focus_working and convergence_working:
+                return TestResult("Comprehensive AF Test", "PASS",
+                                f"PDAF core functions working: {working_tests}/3 tests passed - PHOTOBOOTH COMPATIBLE (minor hunting)",
+                                timestamp, af_capabilities)
+            elif len(critical_failures) == 0:
                 return TestResult("Comprehensive AF Test", "FAIL",
-                                "PDAF partially working but significant issues detected",
+                                f"PDAF partially working but not photobooth ready: {working_tests}/3 tests passed",
                                 timestamp, af_capabilities)
             else:
                 return TestResult("Comprehensive AF Test", "FAIL",
-                                "PDAF system not responding - hardware issue likely",
+                                f"PDAF critical failures - NOT PHOTOBOOTH COMPATIBLE: {'; '.join(critical_failures)}",
                                 timestamp, af_capabilities)
 
         except Exception as e:
