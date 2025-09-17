@@ -42,9 +42,18 @@ class SimpleNativeInstaller:
             return None
 
     def show_progress(self, message):
-        """Show progress in Terminal"""
+        """Show progress in Terminal and log file"""
         timestamp = time.strftime("%H:%M:%S")
-        print(f"[{timestamp}] {message}")
+        log_message = f"[{timestamp}] {message}"
+        print(log_message)
+
+        # Also log to file for debugging when run as app bundle
+        try:
+            log_file = os.path.expanduser("~/Desktop/installer_debug.log")
+            with open(log_file, "a") as f:
+                f.write(log_message + "\n")
+        except:
+            pass
 
     def run_installation(self):
         """Run the complete installation with native dialogs"""
@@ -63,8 +72,11 @@ Click 'Install' to begin or 'Cancel' to exit."""
         result = self.show_dialog("USB Camera Tester Installer", welcome_msg,
                                 ["Install", "Cancel"], "Install")
 
-        if result != "button returned:Install":
-            print("Installation cancelled by user.")
+        # Debug what we actually got
+        self.show_progress(f"Dialog result: {repr(result)}")
+
+        if result != "Install":
+            self.show_progress("Installation cancelled by user.")
             return
 
         print("\n🚀 USB Camera Hardware Test Suite - Installation Starting")
@@ -177,7 +189,7 @@ Would you like to launch the application now?"""
         with zipfile.ZipFile(download_path, 'r') as zip_ref:
             zip_ref.extractall(extract_path)
 
-        self.source_path = os.path.join(extract_path, "Kam-main", "Kam")
+        self.source_path = os.path.join(extract_path, "Kam-main")
 
     def install_dependencies(self):
         """Install required Python dependencies"""
