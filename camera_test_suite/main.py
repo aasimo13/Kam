@@ -2454,30 +2454,54 @@ Click "Continue" below to proceed with camera detection."""
 
                         time.sleep(0.8)  # Wait for focus motor
 
+                        # Safety check before getting focus position
+                        if not self.camera or not self.camera.isOpened():
+                            self.log_message(f"Camera disconnected during focus operation at {pos}")
+                            break
+
                         actual_pos = self.camera.get(cv2.CAP_PROP_FOCUS)
 
                         # CRITICAL: Check if focus actually changed
                         if abs(actual_pos - focus_before) > 5:  # Significant change
                             focus_actually_changed = True
 
-                        # Capture frame and measure sharpness
-                        ret, frame = self.camera.read()
-                        if ret and frame is not None:
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                        # Capture frame and measure sharpness with crash protection
+                        try:
+                            ret, frame = self.camera.read()
+                            if ret and frame is not None and frame.size > 0:
+                                # Additional safety checks for frame integrity
+                                if len(frame.shape) == 3 and frame.shape[0] > 10 and frame.shape[1] > 10:
+                                    try:
+                                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                        if gray is not None and gray.size > 0:
+                                            sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                                        else:
+                                            self.log_message(f"Gray conversion failed at focus position {pos}")
+                                            continue
+                                    except cv2.error as cv_err:
+                                        self.log_message(f"OpenCV error during frame processing at focus {pos}: {cv_err}")
+                                        continue
+                                else:
+                                    self.log_message(f"Invalid frame dimensions at focus position {pos}: {frame.shape if hasattr(frame, 'shape') else 'no shape'}")
+                                    continue
+                            else:
+                                self.log_message(f"Frame read failed at focus position {pos}")
+                                continue
+                        except Exception as e:
+                            self.log_message(f"Critical error during frame processing at focus {pos}: {e}")
+                            continue
 
-                            accuracy = abs(actual_pos - pos)
-                            focus_steps.append({
-                                'target': pos,
-                                'actual': actual_pos,
-                                'sharpness': sharpness,
-                                'accuracy': accuracy,
-                                'focus_changed': abs(actual_pos - focus_before) > 5
-                            })
-                            successful_steps += 1
-                            self.log_message(f"Focus {pos} -> {actual_pos} (sharpness: {sharpness:.2f}, accuracy: {accuracy})")
-                        else:
-                            self.log_message(f"Frame read failed at focus position {pos}")
+                        # Process successful frame capture
+                        accuracy = abs(actual_pos - pos)
+                        focus_steps.append({
+                            'target': pos,
+                            'actual': actual_pos,
+                            'sharpness': sharpness,
+                            'accuracy': accuracy,
+                            'focus_changed': abs(actual_pos - focus_before) > 5
+                        })
+                        successful_steps += 1
+                        self.log_message(f"Focus {pos} -> {actual_pos} (sharpness: {sharpness:.2f}, accuracy: {accuracy})")
 
                     except Exception as e:
                         self.log_message(f"Focus step {pos} failed: {e}")
@@ -2550,9 +2574,22 @@ Click "Continue" below to proceed with camera detection."""
                                 current_focus = self.camera.get(cv2.CAP_PROP_FOCUS)
                                 ret, frame = self.camera.read()
 
-                                if ret and frame is not None:
-                                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                                    sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                                if ret and frame is not None and frame.size > 0:
+                                    # Crash protection for OpenCV operations
+                                    try:
+                                        if len(frame.shape) == 3 and frame.shape[0] > 10 and frame.shape[1] > 10:
+                                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                            if gray is not None and gray.size > 0:
+                                                sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                                            else:
+                                                self.log_message(f"Gray conversion failed during AF monitoring")
+                                                break
+                                        else:
+                                            self.log_message(f"Invalid frame shape during AF monitoring: {frame.shape}")
+                                            break
+                                    except cv2.error as cv_err:
+                                        self.log_message(f"OpenCV error during AF monitoring: {cv_err}")
+                                        break
 
                                     focus_timeline.append({
                                         'time': i * 0.2,
