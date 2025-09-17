@@ -356,12 +356,40 @@ class USBCameraTesterInstaller:
         # Copy application files
         app_source = os.path.join(self.source_path, "camera_test_suite")
         app_dest = os.path.join(resources_dir, "camera_test_suite")
+
+        if not os.path.exists(app_source):
+            raise Exception(f"Source application files not found at: {app_source}")
+
+        self.log_message(f"Copying application files from {app_source} to {app_dest}")
         shutil.copytree(app_source, app_dest)
 
-        # Create launcher script
+        # Create launcher script that finds Python automatically
         launcher_script = f'''#!/bin/bash
-cd "$(dirname "$0")/../Resources"
-{sys.executable} camera_test_suite/main.py "$@"
+
+# Get the directory containing this script
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+RESOURCES_DIR="$SCRIPT_DIR/../Resources"
+
+# Change to the resources directory
+cd "$RESOURCES_DIR"
+
+# Find Python executable (try multiple options)
+PYTHON_CMD=""
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+elif [ -f "/usr/local/bin/python3" ]; then
+    PYTHON_CMD="/usr/local/bin/python3"
+elif [ -f "/opt/homebrew/bin/python3" ]; then
+    PYTHON_CMD="/opt/homebrew/bin/python3"
+else
+    osascript -e 'display dialog "Python is required but not installed. Please install Python from python.org and try again." buttons {{"OK"}} default button "OK" with icon stop'
+    exit 1
+fi
+
+# Launch the application
+exec "$PYTHON_CMD" camera_test_suite/main.py "$@"
 '''
 
         launcher_path = os.path.join(macos_dir, self.app_name.replace(" ", ""))
@@ -408,14 +436,34 @@ cd "$(dirname "$0")/../Resources"
         """Install the app bundle to Applications folder"""
         final_app_path = os.path.join(self.installation_path, f"{self.app_name}.app")
 
+        # Check if temp app bundle exists
+        if not hasattr(self, 'app_bundle_path') or not os.path.exists(self.app_bundle_path):
+            raise Exception("App bundle was not created successfully")
+
+        self.log_message(f"App bundle source: {self.app_bundle_path}")
+        self.log_message(f"Installing to: {final_app_path}")
+
         # Remove existing installation if present
         if os.path.exists(final_app_path):
             self.log_message("Removing existing installation...")
-            shutil.rmtree(final_app_path)
+            try:
+                shutil.rmtree(final_app_path)
+            except Exception as e:
+                self.log_message(f"Warning: Could not remove existing installation: {e}")
+
+        # Check write permissions
+        if not os.access(self.installation_path, os.W_OK):
+            raise Exception(f"No write permission to {self.installation_path}. Please run with administrator privileges.")
 
         # Copy app bundle to Applications
-        self.log_message(f"Installing to {final_app_path}...")
+        self.log_message(f"Copying app bundle to Applications...")
         shutil.copytree(self.app_bundle_path, final_app_path)
+
+        # Verify installation
+        if os.path.exists(final_app_path):
+            self.log_message(f"✓ Successfully installed to {final_app_path}")
+        else:
+            raise Exception("Installation verification failed - app not found in Applications")
 
         self.final_app_path = final_app_path
 
