@@ -62,8 +62,9 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
-# Copy the installer script
+# Copy the installer scripts
 cp "$INSTALLER_SCRIPT" "$RESOURCES_DIR/"
+cp "USB_Camera_Tester_Simple_Installer.py" "$RESOURCES_DIR/"
 
 # Create the launcher script
 print_status "Creating launcher script..."
@@ -78,11 +79,11 @@ RESOURCES_DIR="$SCRIPT_DIR/../Resources"
 # Change to resources directory
 cd "$RESOURCES_DIR"
 
-# Launch the Python installer
+# Launch the simple native installer
 if command -v python3 &> /dev/null; then
-    python3 USB_Camera_Tester_Installer.py "$@"
+    python3 USB_Camera_Tester_Simple_Installer.py "$@"
 elif command -v python &> /dev/null; then
-    python USB_Camera_Tester_Installer.py "$@"
+    python USB_Camera_Tester_Simple_Installer.py "$@"
 else
     osascript -e 'display dialog "Python is required but not installed. Please install Python 3.8 or later from python.org" buttons {"OK"} default button "OK" with icon stop'
     exit 1
@@ -226,9 +227,42 @@ https://github.com/aasimo13/Kam
 © 2025 USB Camera Tester. All rights reserved.
 EOF
 
-# Create the DMG
+# Create the DMG with better presentation
 if command -v hdiutil &> /dev/null; then
-    hdiutil create -format UDZO -volname "USB Camera Tester Installer" -srcfolder "$DMG_TEMP" "$BUILD_DIR/$DMG_NAME"
+    # Create a temporary DMG first
+    TEMP_DMG="$BUILD_DIR/temp_${DMG_NAME}"
+
+    hdiutil create -format UDRW -volname "USB Camera Tester Installer" -srcfolder "$DMG_TEMP" "$TEMP_DMG"
+
+    # Mount the temporary DMG
+    MOUNT_POINT=$(hdiutil attach "$TEMP_DMG" | grep -o '/Volumes/[^"]*')
+
+    # Set DMG window properties to make it more user-friendly
+    if [ -n "$MOUNT_POINT" ]; then
+        # Create a .DS_Store to set window properties
+        osascript << EOF
+tell application "Finder"
+    set dmg_window to make new Finder window to folder ("$MOUNT_POINT" as POSIX file)
+    set current view of dmg_window to icon view
+    set toolbar visible of dmg_window to false
+    set statusbar visible of dmg_window to false
+    set the bounds of dmg_window to {100, 100, 600, 400}
+    set icon size of icon view options of dmg_window to 72
+    set arrangement of icon view options of dmg_window to not arranged
+    set position of item "USB Camera Tester Installer.app" of dmg_window to {150, 200}
+    set position of item "README.txt" of dmg_window to {350, 200}
+    close dmg_window
+end tell
+EOF
+
+        # Unmount the temporary DMG
+        hdiutil detach "$MOUNT_POINT"
+    fi
+
+    # Convert to final compressed DMG
+    hdiutil convert "$TEMP_DMG" -format UDZO -o "$BUILD_DIR/$DMG_NAME"
+    rm "$TEMP_DMG"
+
     print_success "Disk image created: $BUILD_DIR/$DMG_NAME"
 else
     print_warning "hdiutil not available, skipping DMG creation"

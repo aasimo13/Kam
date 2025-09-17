@@ -73,7 +73,9 @@ class CameraHardwareTester:
 
         # Auto-detect USB cameras in a separate thread to avoid blocking UI
         if platform.system() == "Darwin":  # macOS
-            self.show_mac_permission_dialog()
+            # Don't show blocking dialog immediately - let user access UI first
+            self.log_message("macOS detected. Camera access may require permissions.")
+            self.log_message("Use 'Connect Camera' button when ready to test cameras.")
         else:
             self.auto_detect_usb_cameras()
 
@@ -462,7 +464,7 @@ class CameraHardwareTester:
 
         # Center the dialog
         dialog.transient(self.root)
-        dialog.grab_set()
+        # Remove grab_set() to prevent blocking modal dialog
 
         # Create content frame
         content_frame = ttk.Frame(dialog)
@@ -495,8 +497,13 @@ Click "Continue" below to proceed with camera detection."""
 
         def continue_detection():
             dialog.destroy()
-            # Run camera detection in a separate thread to avoid blocking UI
-            threading.Thread(target=self.auto_detect_usb_cameras, daemon=True).start()
+            # If called from connect_camera, try to connect, otherwise run detection
+            if hasattr(self, '_mac_permission_shown'):
+                # Actually connect to the camera now
+                threading.Thread(target=self._connect_camera_internal, daemon=True).start()
+            else:
+                # Run camera detection in a separate thread to avoid blocking UI
+                threading.Thread(target=self.auto_detect_usb_cameras, daemon=True).start()
 
         def skip_detection():
             dialog.destroy()
@@ -755,6 +762,12 @@ Click "Continue" below to proceed with camera detection."""
 
     def connect_camera(self):
         """Connect to the selected camera"""
+        # Show macOS permission dialog if first time connecting on macOS
+        if platform.system() == "Darwin" and not hasattr(self, '_mac_permission_shown'):
+            self._mac_permission_shown = True
+            self.show_mac_permission_dialog()
+            return  # Let the dialog handle the connection
+
         try:
             # Parse camera index from descriptive string or use direct number
             camera_selection = self.camera_var.get()
@@ -788,6 +801,44 @@ Click "Continue" below to proceed with camera detection."""
         except Exception as e:
             messagebox.showerror("Connection Error", f"Failed to connect to USB camera: {str(e)}")
             self.log_message(f"USB Camera connection failed: {str(e)}")
+
+    def _connect_camera_internal(self):
+        """Internal camera connection method (for use after permission dialog)"""
+        try:
+            # Parse camera index from descriptive string or use direct number
+            camera_selection = self.camera_var.get()
+            if "Index " in camera_selection:
+                # Extract index from "Index X: ..." format
+                camera_index = int(camera_selection.split("Index ")[1].split(":")[0])
+            else:
+                # Direct index number
+                camera_index = int(camera_selection)
+
+            # Platform-specific camera backend selection
+            if platform.system() == "Darwin":  # macOS
+                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+            else:
+                self.camera = cv2.VideoCapture(camera_index)
+
+            if not self.camera.isOpened():
+                raise Exception("Could not open USB camera")
+
+            self.camera_index = camera_index
+            self.connection_status.config(text="USB Camera Connected", foreground="green")
+
+            # Get camera info
+            self.update_camera_info()
+
+            # Start preview
+            self.start_preview()
+
+            self.log_message("USB Camera connected successfully")
+
+        except Exception as e:
+            self.log_message(f"USB Camera connection failed: {str(e)}")
+            # Show error in main thread
+            self.root.after(0, lambda: messagebox.showerror("Connection Error",
+                                                           f"Failed to connect to USB camera: {str(e)}"))
 
     def disconnect_camera(self):
         """Disconnect from camera"""
