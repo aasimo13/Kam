@@ -1,3 +1,5 @@
+> ⚠️ Archived — superseded by https://github.com/aasimo13/kamv2 . Kept for history.
+
 # USB Camera Hardware Test Suite
 
 A comprehensive testing application for the WN-L2307k368 48MP BM USB camera module, designed for both macOS development and Raspberry Pi deployment.
